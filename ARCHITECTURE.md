@@ -135,9 +135,13 @@ key that runs a `:` command does not erase what it just reported.
 ## What a change costs
 
 Rust cannot enumerate an enum's variants, so anything that has to be *listed*
-(keys, attributes, settings) is listed by hand and paired with a test that
-iterates the list. That is the whole reason those constants exist: they convert
-a silently forgotten case into a failing build or test.
+is listed by hand and paired with a test that iterates the list. `Setting` does
+not need such a list for its setters — the `match`es in `Options::set`/`get`
+and `Setting::name` are exhaustive, so forgetting one is a build error. For
+`KeyCode::ALL` and `ATTRS` the list *is* the source of truth, and what no test
+can catch is a variant that never gets added to it; that is why the list lives
+next to the type with a comment saying so, and why the tests that iterate it
+exist.
 
 | change | files touched | what catches a miss |
 | --- | --- | --- |

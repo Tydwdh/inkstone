@@ -1,5 +1,7 @@
 # inkstone
 
+[![ci](https://github.com/Tydwdh/inkstone/actions/workflows/ci.yml/badge.svg)](https://github.com/Tydwdh/inkstone/actions/workflows/ci.yml)
+
 A modal terminal editor, written from scratch in Rust. The name is 砚台: the
 stone a calligrapher grinds ink on, the thing the brush is dipped into before
 anything is written.

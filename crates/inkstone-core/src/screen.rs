@@ -1,11 +1,11 @@
 //! The screen model.
 //!
 //! The screen model itself ([`Grid`], [`Cell`], [`Color`]) is defined once in
-//! `edit-rpc`, because the daemon and every frontend must agree on it
+//! `inkstone-rpc`, because the daemon and every frontend must agree on it
 //! byte-for-byte. This module re-exports it and adds the *logical* geometry
 //! ([`Viewport`]) that mapping the cursor onto a grid requires.
 
-pub use edit_rpc::{Cell, Color, Grid, ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLINE};
+pub use inkstone_rpc::{Cell, Color, Grid, ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLINE};
 
 use crate::buffer::Buffer;
 use crate::cursor::Cursor;

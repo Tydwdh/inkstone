@@ -1,8 +1,8 @@
-//! `edit-core` — the editor kernel.
+//! `inkstone-core` — the editor kernel.
 //!
 //! Everything the editor *is* lives here: the document, the cursor, the modes,
 //! the command registry, the keymap, the screen model and the Lua host. The
-//! daemon (`edit-server`) drives this crate over RPC and the frontend (`edit`)
+//! daemon (`inkstone-server`) drives this crate over RPC and the frontend (`inkstone`)
 //! only draws what the daemon computes.
 
 #[macro_use]
@@ -22,8 +22,8 @@ pub mod settings;
 pub use buffer::{Buffer, BufferError};
 pub use command::{CommandError, CommandRegistry};
 pub use cursor::Cursor;
-pub use edit_rpc::Param;
 pub use editor::Editor;
+pub use inkstone_rpc::Param;
 pub use keymap::{encode_key, parse_key, Binding, KeyParseError, Keymap, Lookup};
 pub use lua::LuaHost;
 pub use mode::Mode;

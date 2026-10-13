@@ -5,7 +5,7 @@
 //! so the enum, the struct, the defaults and the `set`/`get` pair cannot drift
 //! apart.
 
-use edit_rpc::Param;
+use inkstone_rpc::Param;
 
 /// A type that can be used for a setting.
 ///

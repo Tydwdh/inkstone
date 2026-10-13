@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn from_path_round_trips_and_tracks_cleanliness() {
-        let dir = std::env::temp_dir().join("edit-buffer-tests");
+        let dir = std::env::temp_dir().join("inkstone-buffer-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("round-trip.txt");
         let _ = std::fs::remove_file(&path);
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn save_to_an_explicit_path_binds_the_buffer() {
-        let dir = std::env::temp_dir().join("edit-buffer-tests");
+        let dir = std::env::temp_dir().join("inkstone-buffer-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("explicit.txt");
         let _ = std::fs::remove_file(&path);
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn non_utf8_files_are_rejected() {
-        let dir = std::env::temp_dir().join("edit-buffer-tests");
+        let dir = std::env::temp_dir().join("inkstone-buffer-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("binary.bin");
         std::fs::write(&path, [0xff, 0xfe, 0x00]).unwrap();
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn missing_parent_directory_is_an_io_error() {
-        let dir = std::env::temp_dir().join("edit-buffer-tests");
+        let dir = std::env::temp_dir().join("inkstone-buffer-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("no-such-dir").join("deep.txt");
         let mut buf = Buffer::from_text("x\n");

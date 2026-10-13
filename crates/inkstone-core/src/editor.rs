@@ -19,7 +19,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use edit_rpc::{KeyCode, KeyMsg, Param};
+use inkstone_rpc::{KeyCode, KeyMsg, Param};
 
 use crate::buffer::{Buffer, BufferError};
 use crate::command::{CommandError, CommandRegistry};
@@ -791,7 +791,7 @@ mod tests {
     fn a_failed_save_quit_does_not_quit() {
         let mut ed = Editor::for_tests();
         ed.buffer = Buffer::from_text("x\n");
-        let dir = std::env::temp_dir().join("edit-editor-tests");
+        let dir = std::env::temp_dir().join("inkstone-editor-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let impossible = dir.join("no-such-dir").join("deep.txt");
 
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn edit_refuses_to_discard_unsaved_changes() {
-        let dir = std::env::temp_dir().join("edit-editor-tests");
+        let dir = std::env::temp_dir().join("inkstone-editor-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("reload.txt");
         std::fs::write(&path, "on disk\n").unwrap();
@@ -916,7 +916,7 @@ mod tests {
 
     #[test]
     fn edit_on_a_clean_buffer_reloads() {
-        let dir = std::env::temp_dir().join("edit-editor-tests");
+        let dir = std::env::temp_dir().join("inkstone-editor-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("clean.txt");
         std::fs::write(&path, "one\n").unwrap();
@@ -932,7 +932,7 @@ mod tests {
     /// buffer/viewport invariants must hold after every single key.
     #[test]
     fn random_key_sequences_keep_the_editor_consistent() {
-        use edit_rpc::{KeyCode, KeyMsg};
+        use inkstone_rpc::{KeyCode, KeyMsg};
 
         let alphabet: Vec<KeyMsg> = "iIaAoOxddwbgG:"
             .chars()

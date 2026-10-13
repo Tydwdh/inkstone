@@ -1,5 +1,5 @@
 //! Integration tests for the daemon: the in-process session seam, plus one
-//! end-to-end run against the real `edit-server` binary over its stdio pipes.
+//! end-to-end run against the real `inkstone-server` binary over its stdio pipes.
 
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
@@ -8,16 +8,18 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use edit_core::Editor;
-use edit_rpc::{
+use inkstone_core::Editor;
+use inkstone_rpc::{
     read_server_msg, write_client_msg, ClientMsg, Grid, KeyCode, KeyMsg, Param, ServerMsg,
 };
-use edit_server::{Response, Session};
+use inkstone_server::{Response, Session};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("edit-server-tests").join(name);
+    let dir = std::env::temp_dir()
+        .join("inkstone-server-tests")
+        .join(name);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -217,7 +219,7 @@ fn a_resize_after_editing_keeps_the_text() {
     assert_eq!(grid.row_text(0).trim_end(), "abcdefghijklmnop");
 }
 
-/// The real thing: spawn `edit-server`, talk to it over its pipes, then check
+/// The real thing: spawn `inkstone-server`, talk to it over its pipes, then check
 /// that the file it wrote is on disk.
 #[test]
 fn end_to_end_over_stdio() {
@@ -225,13 +227,13 @@ fn end_to_end_over_stdio() {
     let path = dir.join("e2e.txt");
     let _ = std::fs::remove_file(&path);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_edit-server"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_inkstone-server"))
         .arg("--no-init")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("failed to spawn edit-server");
+        .expect("failed to spawn inkstone-server");
 
     let stdout = child.stdout.take().expect("piped stdout");
     let (tx, rx) = mpsc::channel::<ServerMsg>();
@@ -308,7 +310,7 @@ fn end_to_end_over_stdio() {
 
     drop(stdin);
     let status = wait_with_timeout(&mut child, TIMEOUT);
-    assert!(status.success(), "edit-server exited with {status:?}");
+    assert!(status.success(), "inkstone-server exited with {status:?}");
     reader.join().expect("the reader thread panicked");
 }
 
@@ -323,11 +325,11 @@ fn wait_with_timeout(
             Ok(None) => {
                 if std::time::Instant::now() > deadline {
                     let _ = child.kill();
-                    panic!("edit-server did not exit within {timeout:?}");
+                    panic!("inkstone-server did not exit within {timeout:?}");
                 }
                 thread::sleep(Duration::from_millis(20));
             }
-            Err(e) => panic!("failed to poll edit-server: {e}"),
+            Err(e) => panic!("failed to poll inkstone-server: {e}"),
         }
     }
 }

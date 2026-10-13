@@ -1,7 +1,7 @@
-//! `edit-server` — the headless editor daemon.
+//! `inkstone-server` — the headless editor daemon.
 //!
-//! Reads [`edit_rpc::ClientMsg`] frames from stdin and writes
-//! [`edit_rpc::ServerMsg`] frames to stdout. Normally spawned by the `edit`
+//! Reads [`inkstone_rpc::ClientMsg`] frames from stdin and writes
+//! [`inkstone_rpc::ServerMsg`] frames to stdout. Normally spawned by the `inkstone`
 //! frontend, but usable on its own for scripting and testing.
 
 use std::path::PathBuf;
@@ -9,11 +9,11 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use edit_server::{run_stdio, InitConfig};
+use inkstone_server::{run_stdio, InitConfig};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "edit-server",
+    name = "inkstone-server",
     version,
     about = "Headless editor daemon speaking msgpack RPC over stdio"
 )]
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     match run_stdio(std::io::stdin(), std::io::stdout(), args.init_config()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("edit-server: {e:#}");
+            eprintln!("inkstone-server: {e:#}");
             ExitCode::FAILURE
         }
     }

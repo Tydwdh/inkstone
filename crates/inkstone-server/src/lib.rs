@@ -1,6 +1,6 @@
-//! The `edit` daemon: owns the editor, speaks msgpack RPC over a byte stream.
+//! The `inkstone` daemon: owns the editor, speaks msgpack RPC over a byte stream.
 //!
-//! The daemon is deliberately thin. All the behaviour lives in [`edit_core`];
+//! The daemon is deliberately thin. All the behaviour lives in [`inkstone_core`];
 //! this crate is the seam that turns a stream of [`ClientMsg`]s into a stream
 //! of [`ServerMsg`]s and nothing else. [`Session`] is that seam expressed as a
 //! pure, blocking-free function so it can be driven from a test without
@@ -13,8 +13,8 @@ use std::thread;
 use crossbeam_channel::{unbounded, Sender};
 
 use anyhow::{Context, Result};
-use edit_core::Editor;
-use edit_rpc::{read_client_msg, write_server_msg, ClientMsg, ServerMsg};
+use inkstone_core::Editor;
+use inkstone_rpc::{read_client_msg, write_server_msg, ClientMsg, ServerMsg};
 
 /// How the daemon should find its Lua configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,7 +124,7 @@ pub fn run_stdio(
 
     let (tx, rx) = unbounded::<ClientMsg>();
     thread::Builder::new()
-        .name("edit-server-rpc-reader".to_string())
+        .name("inkstone-server-rpc-reader".to_string())
         .spawn(move || pump_input(input, tx))
         .context("failed to spawn the reader thread")?;
 
@@ -161,7 +161,7 @@ fn pump_input(mut input: impl Read, tx: Sender<ClientMsg>) {
                 return;
             }
             Err(e) => {
-                eprintln!("edit-server: rpc read error: {e}");
+                eprintln!("inkstone-server: rpc read error: {e}");
                 let _ = tx.send(ClientMsg::Shutdown);
                 return;
             }

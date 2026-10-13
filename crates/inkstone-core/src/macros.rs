@@ -13,7 +13,7 @@
 /// plus a [`SettingValue`](crate::SettingValue) impl if it uses a new type.
 ///
 /// ```text
-/// edit_core::settings! {
+/// inkstone_core::settings! {
 ///     /// Columns a tab advances to.
 ///     Tabstop as tabstop: usize = 4,
 /// }
@@ -104,7 +104,7 @@ macro_rules! settings {
 /// under the wrong name, and forgetting to register one is a compile error.
 ///
 /// ```text
-/// edit_core::commands! {
+/// inkstone_core::commands! {
 ///     noop,
 ///     save,
 /// }

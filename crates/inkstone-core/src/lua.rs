@@ -29,7 +29,7 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use edit_rpc::Param;
+use inkstone_rpc::Param;
 
 use crate::command::CommandRegistry;
 use crate::keymap::Keymap;
@@ -73,7 +73,7 @@ impl LuaHost {
 
     /// Where `init.lua` lives on this platform.
     pub fn default_init_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("", "", "edit")
+        directories::ProjectDirs::from("", "", "inkstone")
             .map(|dirs| dirs.config_dir().join("init.lua"))
     }
 
@@ -270,7 +270,9 @@ mod tests {
 
     /// Write `source` to a unique temp `init.lua` and build an editor from it.
     fn editor_with_init(test_name: &str, source: &str) -> Editor {
-        let dir = std::env::temp_dir().join("edit-lua-tests").join(test_name);
+        let dir = std::env::temp_dir()
+            .join("inkstone-lua-tests")
+            .join(test_name);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("init.lua");
         std::fs::write(&path, source).unwrap();

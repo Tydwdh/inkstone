@@ -1,4 +1,4 @@
-//! Wire protocol for `edit`.
+//! Wire protocol for `inkstone`.
 //!
 //! The protocol is a stream of length-prefixed MessagePack frames. Each frame is
 //! a `u32` big-endian byte length followed by that many bytes of MessagePack

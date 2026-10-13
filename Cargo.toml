@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/edit-core",
-    "crates/edit-rpc",
-    "crates/edit-server",
-    "crates/edit",
+    "crates/inkstone-core",
+    "crates/inkstone-rpc",
+    "crates/inkstone-server",
+    "crates/inkstone",
 ]
 
 [workspace.package]
@@ -14,8 +14,8 @@ rust-version = "1.80"
 license = "MIT"
 
 [workspace.dependencies]
-edit-core = { path = "crates/edit-core" }
-edit-rpc = { path = "crates/edit-rpc" }
+inkstone-core = { path = "crates/inkstone-core" }
+inkstone-rpc = { path = "crates/inkstone-rpc" }
 
 crossterm = "0.29"
 ropey = "1.6"

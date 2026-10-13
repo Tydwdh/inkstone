@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use edit_rpc::{KeyCode, KeyMsg, Mod};
+use inkstone_rpc::{KeyCode, KeyMsg, Mod};
 
 use crate::mode::Mode;
 
@@ -409,7 +409,7 @@ mod tests {
     fn every_protocol_key_has_a_notation() {
         // Iterating `KeyCode::ALL` rather than a hand-written list is what makes
         // a new protocol key impossible to add without teaching the notation.
-        for code in edit_rpc::KeyCode::ALL.iter().copied() {
+        for code in inkstone_rpc::KeyCode::ALL.iter().copied() {
             let key = KeyMsg::new(code);
             let encoded = encode_key(&key);
             let decoded = parse_key(&encoded).unwrap_or_else(|e| {

@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use edit_rpc::Param;
+use inkstone_rpc::Param;
 
 use crate::editor::Editor;
 use crate::mode::Mode;

@@ -19,7 +19,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use edit_rpc::{Cell, Grid, ATTR_REVERSE};
+use inkstone_rpc::{Cell, Grid, ATTR_REVERSE};
 
 use crate::buffer::Buffer;
 use crate::cursor::Cursor;

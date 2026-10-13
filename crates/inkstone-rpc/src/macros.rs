@@ -18,7 +18,7 @@
 /// first.
 ///
 /// ```text
-/// edit_rpc::key_codes! {
+/// inkstone_rpc::key_codes! {
 ///     data {
 ///         Char(char) => 'a',
 ///     }
@@ -73,7 +73,7 @@ macro_rules! key_codes {
 /// appearing in the list a frontend iterates.
 ///
 /// ```text
-/// edit_rpc::cell_attributes! {
+/// inkstone_rpc::cell_attributes! {
 ///     /// Bold text.
 ///     ATTR_BOLD = 0,
 ///     ATTR_REVERSE = 1,

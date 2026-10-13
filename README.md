@@ -1,16 +1,18 @@
-# edit
+# inkstone
 
-A modal terminal editor, written from scratch in Rust.
+A modal terminal editor, written from scratch in Rust. The name is 砚台: the
+stone a calligrapher grinds ink on, the thing the brush is dipped into before
+anything is written.
 
 The design borrows from both sides of the family: **nvim**'s split between a
 headless kernel that owns all state and a thin frontend that only draws, and
 **emacs**'s idea that everything is a command a script can call.
 
 ```
-edit  (crossterm frontend)  ──msgpack over stdio──▶  edit-server  (headless daemon)
+inkstone  (crossterm frontend)  ──msgpack over stdio──▶  inkstone-server  (headless daemon)
                                                             │
                                                             ▼
-                                                       edit-core  (editor kernel)
+                                                       inkstone-core  (editor kernel)
 ```
 
 The daemon composes the screen as a grid of styled cells; the frontend blits
@@ -31,19 +33,19 @@ editing (arrow keys inside `:`), multi-key insert mappings.
 
 ## Build and run
 
-Both binaries must end up in the same directory: `edit` finds `edit-server`
+Both binaries must end up in the same directory: `inkstone` finds `inkstone-server`
 next to itself.
 
 ```sh
 cargo build --workspace
-cargo run -p edit -- sample.txt     # or: ./target/debug/edit.exe sample.txt
+cargo run -p inkstone -- sample.txt     # or: ./target/debug/inkstone.exe sample.txt
 ```
 
-`cargo run -p edit` alone is not enough on a fresh clone — it builds only the
-`edit` package, and the daemon has to exist first.
+`cargo run -p inkstone` alone is not enough on a fresh clone — it builds only the
+`inkstone` package, and the daemon has to exist first.
 
 It needs a real terminal (Windows Terminal or conhost): raw mode fails under a
-redirected pipe. `edit --server <PATH>` points at a daemon somewhere else.
+redirected pipe. `inkstone --server <PATH>` points at a daemon somewhere else.
 
 ## Keys
 
@@ -119,8 +121,8 @@ Keys that are not bindings, because they are what the mode is for:
 
 ## Configuration
 
-`init.lua` lives in the platform config directory (`%APPDATA%\edit\config\init.lua`
-on Windows, `$XDG_CONFIG_HOME/edit/init.lua` on Linux). A file that fails to
+`init.lua` lives in the platform config directory (`%APPDATA%\inkstone\config\init.lua`
+on Windows, `$XDG_CONFIG_HOME/inkstone/init.lua` on Linux). A file that fails to
 parse is reported on the status line and ignored; it never stops the editor.
 
 ```lua
@@ -150,10 +152,10 @@ never firing.
 
 | crate | what |
 | --- | --- |
-| `edit-core` | the kernel: buffer, cursor, modes, command registry, keymap, screen model, Lua host |
-| `edit-rpc` | the wire protocol: message types, framing, and the single definition of the screen grid |
-| `edit-server` | the daemon: owns an `Editor`, turns client messages into server frames |
-| `edit` | the crossterm frontend: terminal events in, grid blits out |
+| `inkstone-core` | the kernel: buffer, cursor, modes, command registry, keymap, screen model, Lua host |
+| `inkstone-rpc` | the wire protocol: message types, framing, and the single definition of the screen grid |
+| `inkstone-server` | the daemon: owns an `Editor`, turns client messages into server frames |
+| `inkstone` | the crossterm frontend: terminal events in, grid blits out |
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) states the invariants and contracts that
 cross those boundaries, and where to add the next thing.

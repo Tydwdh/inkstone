@@ -1,21 +1,21 @@
 # Architecture
 
-What crosses each boundary in `edit`, and the invariants that hold on the other
+What crosses each boundary in `inkstone`, and the invariants that hold on the other
 side of it. Everything here is enforced by tests; the point of writing it down
 is that a new feature has to respect these, not rediscover them.
 
 ## Processes and threads
 
-`edit` (frontend) spawns `edit-server` (daemon) as a child and talks to it over
+`inkstone` (frontend) spawns `inkstone-server` (daemon) as a child and talks to it over
 the child's stdin/stdout. There is exactly one writer to each direction.
 
 | process | thread | owns |
 | --- | --- | --- |
-| `edit` | main | the terminal, the draw loop, the child handles |
-| `edit` | `edit-input-reader` | blocking `event::read()` |
-| `edit` | `edit-rpc-reader` | reading frames from the daemon |
-| `edit-server` | main | the `Editor`, the output stream, the Lua VM |
-| `edit-server` | `edit-server-rpc-reader` | blocking read of client frames |
+| `inkstone` | main | the terminal, the draw loop, the child handles |
+| `inkstone` | `inkstone-input-reader` | blocking `event::read()` |
+| `inkstone` | `inkstone-rpc-reader` | reading frames from the daemon |
+| `inkstone-server` | main | the `Editor`, the output stream, the Lua VM |
+| `inkstone-server` | `inkstone-server-rpc-reader` | blocking read of client frames |
 
 The editor never crosses a thread boundary, so it needs no locks. The only
 shared state is messages in a `crossbeam-channel`.
@@ -23,13 +23,13 @@ shared state is messages in a `crossbeam-channel`.
 ## The wire
 
 Frames are `u32` big-endian length + MessagePack payload, capped at 64 MiB
-(`edit_rpc::MAX_FRAME_LEN`). Milestone 1 is notification-only: no request ids,
+(`inkstone_rpc::MAX_FRAME_LEN`). Milestone 1 is notification-only: no request ids,
 no replies. A clean EOF (zero bytes of a header) means the peer is gone.
 
 ```mermaid
 sequenceDiagram
-    participant F as edit (frontend)
-    participant D as edit-server
+    participant F as inkstone (frontend)
+    participant D as inkstone-server
     F->>D: Resize{cols,rows}
     F->>D: Command{name:"edit_file"}
     D-->>F: Redraw{grid,cursor,cursor_visible}
@@ -47,7 +47,7 @@ screen (`Editor::redraw`), plus one before it starts reading, so a frontend
 that only reads still sees a screen. `ClientMsg::Input` is a *key*, never a
 character: mode logic lives in the daemon.
 
-`Grid`/`Cell`/`Color` are defined once, in `edit-rpc`. `edit-core` re-exports
+`Grid`/`Cell`/`Color` are defined once, in `inkstone-rpc`. `inkstone-core` re-exports
 them; it does not define its own.
 
 ## The screen model
@@ -136,9 +136,9 @@ key that runs a `:` command does not erase what it just reported.
 
 The recurring shapes — keys, cell attributes, settings, commands — are declared
 once, in a macro, and everything else is generated from that declaration:
-`key_codes!` (`edit-rpc`) emits the enum, `ALL` and the spelling table;
+`key_codes!` (`inkstone-rpc`) emits the enum, `ALL` and the spelling table;
 `cell_attributes!` emits the constants and `ATTRS`; `settings!` and `commands!`
-(`edit-core`) emit the setting enum, the options struct, its defaults and the
+(`inkstone-core`) emit the setting enum, the options struct, its defaults and the
 `set`/`get` pair, and the command registry. There is no second list to keep in
 step, which is what makes a forgotten case a build error instead of a runtime
 surprise.
@@ -149,8 +149,8 @@ surprise.
 | new motion | `cursor.rs` (pure) + one thin command | compiler |
 | new setting | one line in the `settings!` table (plus a `SettingValue` impl for a new type) | nothing else to touch; the generated test round-trips it |
 | new key | one line in the `key_codes!` table | the frontend's mapping test fails to compile until it is mapped |
-| new cell attribute | one line in `cell_attributes!`, then `render.rs` and `edit/main.rs` | the frontend attribute test |
-| new message | `edit-rpc`, `edit-server` (`Session::handle`), `edit` (frontend match) | exhaustive matches |
+| new cell attribute | one line in `cell_attributes!`, then `render.rs` and `inkstone/src/main.rs` | the frontend attribute test |
+| new message | `inkstone-rpc`, `inkstone-server` (`Session::handle`), `inkstone` (frontend match) | exhaustive matches |
 | new mode (e.g. visual) | `mode.rs`, `editor.rs` (dispatch), `command.rs`, `keymap.rs`, `lua.rs` (name), `render.rs` (display) | exhaustive matches on `Mode` |
 | new frontend | nothing existing | — (that is the point of the split) |
 
@@ -172,7 +172,7 @@ compiler-enforced.
   The enum, the struct, the default, the name lookup and `set`/`get` all follow
   from it. A new *type* of value needs a `SettingValue` impl saying how it maps
   to and from `Param`.
-- **A new key**: add one line to the `key_codes!` table in `edit-rpc`. The
+- **A new key**: add one line to the `key_codes!` table in `inkstone-rpc`. The
   notation layer needs nothing; the frontend is forced to map it, because the
   test that iterates `KeyCode::ALL` matches over the enum exhaustively.
 - **A new cell attribute**: add one line to `cell_attributes!`, then teach

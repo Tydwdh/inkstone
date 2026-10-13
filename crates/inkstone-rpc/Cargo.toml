@@ -1,5 +1,5 @@
 [package]
-name = "edit-rpc"
+name = "inkstone-rpc"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

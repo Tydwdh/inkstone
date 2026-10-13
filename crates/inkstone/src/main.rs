@@ -1,4 +1,4 @@
-//! `edit` — the terminal frontend.
+//! `inkstone` — the terminal frontend.
 //!
 //! The frontend is deliberately dumb: it translates terminal events into
 //! [`ClientMsg`]s, and blits whatever [`ServerMsg`] grid comes back. It holds
@@ -18,14 +18,14 @@ use crossterm::style::{Attribute, Color as CtColor, Colors, Print, SetAttribute,
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{cursor, execute, queue, terminal};
 
-use edit_rpc::{
+use inkstone_rpc::{
     read_server_msg, write_client_msg, ClientMsg, Color, Grid, KeyCode, KeyMsg, Mod, Param,
     ServerMsg, ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLINE,
 };
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "edit",
+    name = "inkstone",
     version,
     about = "A modal terminal editor: crossterm frontend over a headless daemon"
 )]
@@ -33,7 +33,7 @@ struct Args {
     /// File to open. Created on write if it does not exist.
     file: Option<PathBuf>,
 
-    /// The daemon to talk to. Defaults to `edit-server` next to this executable.
+    /// The daemon to talk to. Defaults to `inkstone-server` next to this executable.
     #[arg(long, value_name = "PATH")]
     server: Option<PathBuf>,
 }
@@ -56,7 +56,7 @@ fn main() -> Result<()> {
                 "failed to start the daemon at {}\n\
                  looked for it next to:   {}\n\
                  build it first:          cargo build --workspace\n\
-                 or point at it:          edit --server <PATH>",
+                 or point at it:          inkstone --server <PATH>",
                 server.display(),
                 looked_next_to,
             )
@@ -137,7 +137,7 @@ fn send(stdin: &mut impl Write, msg: &ClientMsg) -> Result<()> {
 fn spawn_server_reader(stdout: std::process::ChildStdout) -> Receiver<ServerMsg> {
     let (tx, rx) = unbounded();
     thread::Builder::new()
-        .name("edit-rpc-reader".to_string())
+        .name("inkstone-rpc-reader".to_string())
         .spawn(move || {
             let mut input = BufReader::new(stdout);
             while let Ok(Some(message)) = read_server_msg(&mut input) {
@@ -154,7 +154,7 @@ fn spawn_server_reader(stdout: std::process::ChildStdout) -> Receiver<ServerMsg>
 fn spawn_input_reader() -> Receiver<ClientMsg> {
     let (tx, rx) = unbounded();
     thread::Builder::new()
-        .name("edit-input-reader".to_string())
+        .name("inkstone-input-reader".to_string())
         .spawn(move || input_loop(tx))
         .expect("failed to spawn the input thread");
     rx
@@ -346,9 +346,9 @@ fn resolve_server(explicit: Option<PathBuf>) -> Result<PathBuf> {
         return Ok(path);
     }
     let name = if cfg!(windows) {
-        "edit-server.exe"
+        "inkstone-server.exe"
     } else {
-        "edit-server"
+        "inkstone-server"
     };
     let sibling = std::env::current_exe()
         .ok()
@@ -364,7 +364,7 @@ fn resolve_server(explicit: Option<PathBuf>) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyModifiers};
-    use edit_rpc::Cell;
+    use inkstone_rpc::Cell;
 
     fn render(grid: &Grid, cursor: (u16, u16), visible: bool) -> String {
         let mut out = Vec::new();
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn every_attribute_bit_reaches_the_terminal() {
         let mut rendered = Vec::new();
-        for &bit in edit_rpc::ATTRS {
+        for &bit in inkstone_rpc::ATTRS {
             let mut out = Vec::new();
             queue_attributes(&mut out, bit).unwrap();
             assert!(!out.is_empty(), "attribute bit {bit} is not translated");
@@ -504,7 +504,7 @@ mod tests {
             }
         }
 
-        let all = edit_rpc::ATTRS.iter().fold(0u16, |acc, bit| acc | bit);
+        let all = inkstone_rpc::ATTRS.iter().fold(0u16, |acc, bit| acc | bit);
         let mut out = Vec::new();
         queue_attributes(&mut out, all).unwrap();
         for bit in &rendered {
@@ -549,15 +549,15 @@ mod tests {
 
     #[test]
     fn the_server_defaults_to_a_sibling_binary() {
-        let explicit = PathBuf::from("/tmp/edit-server");
+        let explicit = PathBuf::from("/tmp/inkstone-server");
         assert_eq!(resolve_server(Some(explicit.clone())).unwrap(), explicit);
         // With no explicit path we either find a sibling or fall back to PATH;
         // either way the name is what we asked for.
         let resolved = resolve_server(None).unwrap();
         assert!(resolved.ends_with(if cfg!(windows) {
-            "edit-server.exe"
+            "inkstone-server.exe"
         } else {
-            "edit-server"
+            "inkstone-server"
         }));
     }
 }

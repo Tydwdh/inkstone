@@ -34,6 +34,39 @@ use crate::CoreError;
 /// Guard against a Lua command calling itself forever.
 pub const MAX_COMMAND_DEPTH: usize = 100;
 
+/// A user-settable option, named.
+///
+/// The editor, the script layer and the renderer all go through this enum
+/// rather than through option name strings, so adding an option is: add a
+/// field to [`Options`], add a variant here, pick a default. The `match`es
+/// below are exhaustive, which turns a missed case into a build error instead
+/// of a script that fails at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Setting {
+    /// Columns a tab advances to.
+    Tabstop,
+    /// Whether to draw a line-number gutter.
+    Number,
+}
+
+impl Setting {
+    /// Every setting, for name lookup and for tests.
+    pub const ALL: [Setting; 2] = [Setting::Tabstop, Setting::Number];
+
+    /// The name a script uses.
+    pub fn name(self) -> &'static str {
+        match self {
+            Setting::Tabstop => "tabstop",
+            Setting::Number => "number",
+        }
+    }
+
+    /// The setting a script's name refers to.
+    pub fn from_name(name: &str) -> Option<Setting> {
+        Setting::ALL.into_iter().find(|s| s.name() == name)
+    }
+}
+
 /// User-settable editor options (also reachable from Lua via `ed.set`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
@@ -48,6 +81,28 @@ impl Default for Options {
         Self {
             tabstop: 4,
             number: false,
+        }
+    }
+}
+
+impl Options {
+    /// Set a setting, rejecting values of the wrong kind.
+    pub fn set(&mut self, setting: Setting, value: Param) -> Result<(), String> {
+        match (setting, value) {
+            (Setting::Tabstop, Param::Int(n)) if n >= 1 => self.tabstop = n as usize,
+            (Setting::Number, Param::Bool(b)) => self.number = b,
+            (setting, value) => {
+                return Err(format!("{} does not accept {value:?}", setting.name()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Read a setting.
+    pub fn get(&self, setting: Setting) -> Param {
+        match setting {
+            Setting::Tabstop => Param::Int(self.tabstop as i64),
+            Setting::Number => Param::Bool(self.number),
         }
     }
 }
@@ -757,6 +812,49 @@ mod tests {
         ed.cursor = Cursor::new(0, 1);
         feed(&mut ed, "i<Del><Esc>");
         assert_eq!(ed.buffer.text(), "ac\n");
+    }
+
+    #[test]
+    fn every_setting_round_trips_through_its_name() {
+        for setting in Setting::ALL {
+            let mut options = Options::default();
+            let changed = match options.get(setting) {
+                Param::Bool(b) => Param::Bool(!b),
+                Param::Int(n) => Param::Int(n + 1),
+                ref other => panic!("{setting:?} has an unprobeable type: {other:?}"),
+            };
+            options
+                .set(setting, changed.clone())
+                .unwrap_or_else(|e| panic!("{setting:?} cannot be set: {e}"));
+            assert_eq!(
+                options.get(setting),
+                changed,
+                "{setting:?} did not survive a set/get round trip"
+            );
+            assert_eq!(
+                Setting::from_name(setting.name()),
+                Some(setting),
+                "{setting:?} cannot be looked up by name"
+            );
+        }
+
+        let mut names: Vec<&str> = Setting::ALL.iter().map(|s| s.name()).collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "two settings share a name");
+    }
+
+    #[test]
+    fn a_setting_rejects_values_of_the_wrong_kind() {
+        let mut options = Options::default();
+        assert!(options.set(Setting::Tabstop, Param::Bool(true)).is_err());
+        assert!(options.set(Setting::Tabstop, Param::Int(0)).is_err());
+        assert!(options
+            .set(Setting::Number, Param::Str("yes".into()))
+            .is_err());
+        assert_eq!(options.tabstop, 4, "a rejected set leaves the option alone");
+        assert_eq!(Setting::from_name("nope"), None);
     }
 
     #[test]

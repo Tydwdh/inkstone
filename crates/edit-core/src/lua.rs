@@ -32,7 +32,7 @@ use mlua::{Function, Lua, Table, Value};
 use edit_rpc::Param;
 
 use crate::command::CommandRegistry;
-use crate::editor::Options;
+use crate::editor::{Options, Setting};
 use crate::keymap::Keymap;
 use crate::mode::Mode;
 use crate::CoreError;
@@ -177,41 +177,34 @@ impl LuaHost {
                 })?,
         )?;
 
+        // The list of options lives in `Options`; this layer only converts
+        // between Lua values and `Param`.
         let options = Rc::clone(&self.options);
         ed.set(
             "set",
             self.lua
                 .create_function(move |_, (name, value): (String, Value)| {
-                    let mut options = options.borrow_mut();
-                    match (name.as_str(), value) {
-                        ("tabstop", Value::Integer(n)) if n >= 1 => options.tabstop = n as usize,
-                        ("number", Value::Boolean(b)) => options.number = b,
-                        (other, value) => {
-                            return Err(mlua::Error::RuntimeError(format!(
-                                "ed.set: cannot set {other} to {}",
-                                value.type_name()
-                            )));
-                        }
-                    }
-                    Ok(())
+                    let setting = Setting::from_name(&name).ok_or_else(|| {
+                        mlua::Error::RuntimeError(format!("ed.set: unknown option {name}"))
+                    })?;
+                    let value = value_to_param(&value)?;
+                    options
+                        .borrow_mut()
+                        .set(setting, value)
+                        .map_err(|e| mlua::Error::RuntimeError(format!("ed.set: {e}")))
                 })?,
         )?;
 
         let options = Rc::clone(&self.options);
         ed.set(
             "get",
-            self.lua.create_function(move |_, name: String| {
-                let options = options.borrow();
-                Ok(match name.as_str() {
-                    "tabstop" => Value::Integer(options.tabstop as i64),
-                    "number" => Value::Boolean(options.number),
-                    other => {
-                        return Err(mlua::Error::RuntimeError(format!(
-                            "ed.get: unknown option {other}"
-                        )));
-                    }
-                })
-            })?,
+            self.lua
+                .create_function(move |lua, name: String| match Setting::from_name(&name) {
+                    Some(setting) => param_to_value(lua, &options.borrow().get(setting)),
+                    None => Err(mlua::Error::RuntimeError(format!(
+                        "ed.get: unknown option {name}"
+                    ))),
+                })?,
         )?;
 
         self.lua.globals().set("ed", ed)?;
@@ -383,12 +376,12 @@ ed.set("tabstop", 8)
         assert_eq!(host_options.borrow().tabstop, 2);
 
         let err = host.load_str("test", r#"ed.set("nope", 1)"#).unwrap_err();
-        assert!(err.to_string().contains("cannot set nope"), "{err}");
+        assert!(err.to_string().contains("unknown option nope"), "{err}");
 
         let err = host
             .load_str("test", r#"ed.set("tabstop", "four")"#)
             .unwrap_err();
-        assert!(err.to_string().contains("cannot set tabstop"), "{err}");
+        assert!(err.to_string().contains("tabstop does not accept"), "{err}");
     }
 
     #[test]

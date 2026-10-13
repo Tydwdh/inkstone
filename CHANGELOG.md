@@ -10,6 +10,18 @@
 - `ed.map("i", "jk", ...)` was accepted and then never fired. It is now
   rejected at load with an explanation.
 
+### Changed
+- Option access goes through a `Setting` enum instead of option name strings,
+  so the editor, the script layer and the renderer cannot disagree about which
+  options exist, and a forgotten case is a build error rather than a runtime
+  "unknown option".
+- `KeyCode::ALL` and `ATTRS` enumerate the protocol's keys and cell attributes.
+  Neither list is enforceable by the compiler, so each is paired with a test
+  that iterates it and covers the notation, the terminal mapping and the
+  attribute translation.
+- `Shift`+`Tab` used to be dropped by the frontend; it now arrives as `<S-Tab>`,
+  which the protocol could always express.
+
 ### Removed
 - Dead API with no caller outside its own test: `edit_rpc::write_msg_compact`
   (a second framing encoder), `Grid::resize`, `Viewport::bottom_line`,

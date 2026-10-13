@@ -407,6 +407,20 @@ mod tests {
     }
 
     #[test]
+    fn every_protocol_key_has_a_notation() {
+        // Iterating `KeyCode::ALL` rather than a hand-written list is what makes
+        // a new protocol key impossible to add without teaching the notation.
+        for code in edit_rpc::KeyCode::ALL {
+            let key = KeyMsg::new(code);
+            let encoded = encode_key(&key);
+            let decoded = parse_key(&encoded).unwrap_or_else(|e| {
+                panic!("{code:?} encodes to {encoded:?}, which does not parse: {e}")
+            });
+            assert_eq!(decoded, vec![key], "{code:?} does not survive {encoded:?}");
+        }
+    }
+
+    #[test]
     fn malformed_notation_is_rejected() {
         assert!(parse_key("").is_err());
         assert!(parse_key("<Esc").is_err());

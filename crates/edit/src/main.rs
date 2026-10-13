@@ -190,7 +190,33 @@ fn input_loop(tx: Sender<ClientMsg>) {
 }
 
 fn to_key_msg(key: event::KeyEvent) -> Option<KeyMsg> {
-    let code = match key.code {
+    // `BackTab` is crossterm's Shift+Tab; the protocol spells that `<S-Tab>`,
+    // and dropping it would make one of its keys unreachable.
+    let (code, implies_shift) = match key.code {
+        event::KeyCode::BackTab => (KeyCode::Tab, true),
+        other => (to_key_code(other)?, false),
+    };
+    let mut mods = Vec::new();
+    if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+        mods.push(Mod::Ctrl);
+    }
+    if key.modifiers.contains(event::KeyModifiers::ALT) {
+        mods.push(Mod::Alt);
+    }
+    // Shift is already baked into a character; keeping it would make `A` and
+    // `<S-a>` two different keys.
+    if (key.modifiers.contains(event::KeyModifiers::SHIFT) || implies_shift)
+        && !matches!(code, KeyCode::Char(_))
+        && !mods.contains(&Mod::Shift)
+    {
+        mods.push(Mod::Shift);
+    }
+    Some(KeyMsg { code, mods })
+}
+
+/// The protocol key for a terminal key, if the protocol has one at all.
+fn to_key_code(code: event::KeyCode) -> Option<KeyCode> {
+    Some(match code {
         event::KeyCode::Char(c) => KeyCode::Char(c),
         event::KeyCode::Enter => KeyCode::Enter,
         event::KeyCode::Esc => KeyCode::Esc,
@@ -205,21 +231,10 @@ fn to_key_msg(key: event::KeyEvent) -> Option<KeyMsg> {
         event::KeyCode::Delete => KeyCode::Delete,
         event::KeyCode::PageUp => KeyCode::PageUp,
         event::KeyCode::PageDown => KeyCode::PageDown,
+        // BackTab is handled by the caller; everything else (function keys,
+        // Insert, ...) is not a key the protocol can express.
         _ => return None,
-    };
-    let mut mods = Vec::new();
-    if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-        mods.push(Mod::Ctrl);
-    }
-    if key.modifiers.contains(event::KeyModifiers::ALT) {
-        mods.push(Mod::Alt);
-    }
-    // Shift is already baked into a character; keeping it would make `A` and
-    // `<S-a>` two different keys.
-    if key.modifiers.contains(event::KeyModifiers::SHIFT) && !matches!(code, KeyCode::Char(_)) {
-        mods.push(Mod::Shift);
-    }
-    Some(KeyMsg { code, mods })
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -437,6 +452,82 @@ mod tests {
     #[test]
     fn shift_is_kept_for_named_keys() {
         let msg = to_key_msg(key(event::KeyCode::Tab, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(msg.mods, vec![Mod::Shift]);
+    }
+
+    /// Iterating the protocol's key list means a new `KeyCode` cannot be added
+    /// without deciding how a terminal produces it.
+    #[test]
+    fn every_protocol_key_has_a_terminal_mapping() {
+        for code in KeyCode::ALL {
+            let terminal_code = match code {
+                KeyCode::Char(c) => event::KeyCode::Char(c),
+                KeyCode::Enter => event::KeyCode::Enter,
+                KeyCode::Esc => event::KeyCode::Esc,
+                KeyCode::Backspace => event::KeyCode::Backspace,
+                KeyCode::Tab => event::KeyCode::Tab,
+                KeyCode::Left => event::KeyCode::Left,
+                KeyCode::Right => event::KeyCode::Right,
+                KeyCode::Up => event::KeyCode::Up,
+                KeyCode::Down => event::KeyCode::Down,
+                KeyCode::Home => event::KeyCode::Home,
+                KeyCode::End => event::KeyCode::End,
+                KeyCode::Delete => event::KeyCode::Delete,
+                KeyCode::PageUp => event::KeyCode::PageUp,
+                KeyCode::PageDown => event::KeyCode::PageDown,
+            };
+            let decoded = to_key_msg(key(terminal_code, KeyModifiers::empty()));
+            assert_eq!(
+                decoded,
+                Some(KeyMsg::new(code)),
+                "{code:?} cannot be produced by the frontend"
+            );
+        }
+    }
+
+    /// Same idea for cell attributes: a new bit has to be translated or the
+    /// style is silently lost.
+    #[test]
+    fn every_attribute_bit_reaches_the_terminal() {
+        let mut rendered = Vec::new();
+        for bit in edit_rpc::ATTRS {
+            let mut out = Vec::new();
+            queue_attributes(&mut out, bit).unwrap();
+            assert!(!out.is_empty(), "attribute bit {bit} is not translated");
+            rendered.push(out);
+        }
+        for (i, first) in rendered.iter().enumerate() {
+            for (j, second) in rendered.iter().enumerate() {
+                if i != j {
+                    assert_ne!(first, second, "two attribute bits render identically");
+                }
+            }
+        }
+
+        let all = edit_rpc::ATTRS.iter().fold(0u16, |acc, bit| acc | bit);
+        let mut out = Vec::new();
+        queue_attributes(&mut out, all).unwrap();
+        for bit in &rendered {
+            let needle = String::from_utf8_lossy(bit);
+            assert!(
+                String::from_utf8_lossy(&out).contains(needle.as_ref()),
+                "a cell with every attribute set is missing {needle:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shift_tab_is_reported_as_a_shifted_tab() {
+        let msg = to_key_msg(key(event::KeyCode::BackTab, KeyModifiers::SHIFT)).unwrap();
+        assert_eq!(
+            msg,
+            KeyMsg {
+                code: KeyCode::Tab,
+                mods: vec![Mod::Shift]
+            }
+        );
+        // Even when the terminal forgets to say so.
+        let msg = to_key_msg(key(event::KeyCode::BackTab, KeyModifiers::empty())).unwrap();
         assert_eq!(msg.mods, vec![Mod::Shift]);
     }
 

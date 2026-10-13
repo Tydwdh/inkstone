@@ -132,6 +132,29 @@ and ignored — a config typo must not stop the editor from opening.
 A message survives until the next key pressed *outside* command mode, so the
 key that runs a `:` command does not erase what it just reported.
 
+## What a change costs
+
+Rust cannot enumerate an enum's variants, so anything that has to be *listed*
+(keys, attributes, settings) is listed by hand and paired with a test that
+iterates the list. That is the whole reason those constants exist: they convert
+a silently forgotten case into a failing build or test.
+
+| change | files touched | what catches a miss |
+| --- | --- | --- |
+| new command | `command.rs`, optionally `keymap.rs` + `README.md` | the README keymap test |
+| new motion | `cursor.rs` (pure) + one thin command | compiler |
+| new setting | `editor.rs` (`Options` field, `Setting` variant, default) | exhaustive `set`/`get`/`name` matches |
+| new key | `edit-rpc` (`KeyCode` + `KeyCode::ALL`), `keymap.rs` (notation), `edit/main.rs` (terminal) | two tests iterate `KeyCode::ALL` |
+| new cell attribute | `edit-rpc` (bit + `ATTRS`), `render.rs`, `edit/main.rs` | the frontend attribute test |
+| new message | `edit-rpc`, `edit-server` (`Session::handle`), `edit` (frontend match) | exhaustive matches |
+| new mode (e.g. visual) | `mode.rs`, `editor.rs` (dispatch), `command.rs`, `keymap.rs`, `lua.rs` (name), `render.rs` (display) | exhaustive matches on `Mode` |
+| new frontend | nothing existing | — (that is the point of the split) |
+
+A new mode touching six files is not a design failure: a mode *is* a key
+handler, a set of commands, a thing scripts can name and a thing to draw. What
+matters is that each touch is one match arm, and that three of the six are
+compiler-enforced.
+
 ## Adding things
 
 - **A new command**: write the function in `command.rs`, register it in
@@ -141,6 +164,14 @@ key that runs a `:` command does not erase what it just reported.
 - **A new motion**: implement the movement on `Cursor` (pure, buffer in,
   position out), then a command that calls it and ends with `after_edit()`,
   which re-clamps the cursor, scrolls it into view and marks the screen dirty.
+- **A new setting**: add the field to `Options` with a default, add a
+  `Setting` variant, and add it to `Setting::ALL`. The `set`/`get`/`name`
+  matches are exhaustive, so a forgotten case stops the build.
+- **A new key**: add the `KeyCode` variant *and* add it to `KeyCode::ALL`;
+  tests in `edit-core` (notation) and `edit` (terminal mapping) then fail until
+  both sides know it.
+- **A new cell attribute**: add the bit *and* add it to `ATTRS`; the frontend
+  test fails until it translates the bit.
 - **A new message**: add it to `ClientMsg`/`ServerMsg`, handle it in
   `Session::handle`. Frontends are free to ignore anything they do not know.
 - **A new frontend**: implement the framing, blit `Grid`, forward terminal keys

@@ -26,6 +26,12 @@ pub const ATTR_BOLD: u16 = 1 << 0;
 pub const ATTR_UNDERLINE: u16 = 1 << 1;
 pub const ATTR_REVERSE: u16 = 1 << 2;
 
+/// Every attribute bit, so a frontend can prove it translates all of them.
+///
+/// Like [`KeyCode::ALL`], this is hand-maintained: adding a bit without adding
+/// it here leaves a frontend silently dropping the new style.
+pub const ATTRS: [u16; 3] = [ATTR_BOLD, ATTR_UNDERLINE, ATTR_REVERSE];
+
 /// Errors produced while encoding, decoding, or framing a message.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
@@ -62,6 +68,31 @@ pub enum KeyCode {
     Delete,
     PageUp,
     PageDown,
+}
+
+impl KeyCode {
+    /// Every key the protocol can express.
+    ///
+    /// Nothing enforces this list at compile time, so it is the one thing a new
+    /// `KeyCode` variant has to be added to by hand — and the tests that iterate
+    /// it (key notation round-tripping in `edit-core`, terminal mapping in the
+    /// frontend) then fail until the new key is handled everywhere.
+    pub const ALL: [KeyCode; 14] = [
+        KeyCode::Char('a'),
+        KeyCode::Enter,
+        KeyCode::Esc,
+        KeyCode::Backspace,
+        KeyCode::Tab,
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::Delete,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+    ];
 }
 
 /// A modifier held while a key was pressed.

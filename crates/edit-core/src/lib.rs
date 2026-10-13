@@ -18,7 +18,7 @@ pub mod screen;
 pub use buffer::{Buffer, BufferError};
 pub use command::{CommandError, CommandRegistry};
 pub use cursor::Cursor;
-pub use editor::{Editor, Options};
+pub use editor::{Editor, Options, Setting};
 pub use keymap::{encode_key, parse_key, Binding, KeyParseError, Keymap, Lookup};
 pub use lua::LuaHost;
 pub use mode::Mode;

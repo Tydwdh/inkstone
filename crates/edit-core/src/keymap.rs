@@ -420,6 +420,56 @@ mod tests {
         assert!(parse_key(">").is_err());
     }
 
+    /// The README's table is what a user reads; this makes it impossible for it
+    /// to drift away from the bindings the editor actually ships.
+    #[test]
+    fn the_readme_keymap_table_matches_the_defaults() {
+        let readme =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"))
+                .expect("README.md should exist in the workspace root");
+        let table = readme
+            .split_once("<!-- keymap:begin -->")
+            .and_then(|(_, rest)| rest.split_once("<!-- keymap:end -->"))
+            .map(|(table, _)| table)
+            .expect("README.md should contain the keymap block");
+
+        let mut documented: Vec<(Mode, String, Vec<String>)> = Vec::new();
+        for row in table.lines() {
+            let row = row.trim();
+            if !row.starts_with('|') {
+                continue;
+            }
+            let columns: Vec<&str> = row.trim_matches('|').split('|').map(str::trim).collect();
+            let [mode, keys, commands] = columns[..] else {
+                continue;
+            };
+            let mode = match mode {
+                "n" => Mode::Normal,
+                "i" => Mode::Insert,
+                // The header and the `| --- |` separator row.
+                "mode" => continue,
+                other if other.starts_with('-') => continue,
+                other => panic!("unknown mode {other:?} in the README keymap table"),
+            };
+            documented.push((
+                mode,
+                keys.trim_matches('`').to_string(),
+                commands
+                    .split(',')
+                    .map(|c| c.trim().trim_matches('`').to_string())
+                    .collect(),
+            ));
+        }
+
+        let mut actual = Keymap::with_defaults().bindings();
+        documented.sort_by(|a, b| (a.0.name(), &a.1).cmp(&(b.0.name(), &b.1)));
+        actual.sort_by(|a, b| (a.0.name(), &a.1).cmp(&(b.0.name(), &b.1)));
+        assert_eq!(
+            documented, actual,
+            "the README keymap table and the built-in keymap disagree"
+        );
+    }
+
     #[test]
     fn navigation_keys_are_bound_in_both_modes() {
         let km = Keymap::with_defaults();

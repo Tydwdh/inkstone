@@ -99,21 +99,6 @@ impl CommandRegistry {
         self.map.get(name).copied()
     }
 
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
-    /// Every registered command name, sorted.
-    pub fn names(&self) -> Vec<&'static str> {
-        let mut names: Vec<_> = self.map.keys().copied().collect();
-        names.sort_unstable();
-        names
-    }
-
     /// Run `name` against `editor`.
     pub fn run(&self, editor: &mut Editor, name: &str, params: &[Param]) -> Result<()> {
         match self.map.get(name) {
@@ -155,7 +140,7 @@ fn cmd_move_left(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_left(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -163,7 +148,7 @@ fn cmd_move_right(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_right(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -171,7 +156,7 @@ fn cmd_move_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_up(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -179,7 +164,7 @@ fn cmd_move_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_down(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -187,7 +172,7 @@ fn cmd_move_word_forward(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_word_forward(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -195,31 +180,31 @@ fn cmd_move_word_backward(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_word_backward(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
 fn cmd_move_line_start(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.move_line_start(&editor.buffer);
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
 fn cmd_move_line_end(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.move_line_end(&editor.buffer);
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
 fn cmd_goto_first_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.goto_first_line(&editor.buffer);
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
 fn cmd_goto_last_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.goto_last_line(&editor.buffer);
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -234,7 +219,7 @@ fn cmd_page_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..page_step(editor, params) {
         editor.cursor.move_down(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -242,7 +227,7 @@ fn cmd_page_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..page_step(editor, params) {
         editor.cursor.move_up(&editor.buffer);
     }
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -254,7 +239,7 @@ fn cmd_enter_insert(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 fn cmd_enter_insert_before(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.col = 0;
     editor.mode = Mode::Insert;
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -262,14 +247,14 @@ fn cmd_append(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let end = editor.buffer.line_len(editor.cursor.row);
     editor.cursor.col = (editor.cursor.col + 1).min(end);
     editor.mode = Mode::Insert;
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
 fn cmd_append_eol(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.col = editor.buffer.line_len(editor.cursor.row);
     editor.mode = Mode::Insert;
-    editor.cursor_settled();
+    editor.after_edit();
     Ok(())
 }
 
@@ -365,7 +350,7 @@ fn cmd_escape(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.pending.clear();
     if was_insert {
         editor.cursor.move_left(&editor.buffer);
-        editor.cursor_settled();
+        editor.after_edit();
     }
     Ok(())
 }
@@ -445,14 +430,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builtins_are_present_and_enumerable() {
+    fn builtins_are_present() {
         let registry = CommandRegistry::with_builtins();
-        assert!(registry.contains("delete_line"));
+        for name in [
+            "delete_line",
+            "save_quit",
+            "edit_file_force",
+            "page_down",
+            "move_word_backward",
+        ] {
+            assert!(registry.contains(name), "{name} is missing");
+        }
         assert!(!registry.contains("nope"));
-        let names = registry.names();
-        assert!(names.contains(&"save_quit"));
-        assert_eq!(names.len(), registry.len());
-        assert!(names.windows(2).all(|w| w[0] < w[1]), "names are sorted");
+        // Every default binding must resolve to a real command.
+        let keymap = crate::keymap::Keymap::with_defaults();
+        for (_, _, commands) in keymap.bindings() {
+            for command in commands {
+                assert!(registry.contains(&command), "unbound command: {command}");
+            }
+        }
     }
 
     #[test]

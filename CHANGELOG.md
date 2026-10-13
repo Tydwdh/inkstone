@@ -10,6 +10,12 @@
 - `ed.map("i", "jk", ...)` was accepted and then never fired. It is now
   rejected at load with an explanation.
 
+### Removed
+- Dead API with no caller outside its own test: `edit_rpc::write_msg_compact`
+  (a second framing encoder), `Grid::resize`, `Viewport::bottom_line`,
+  `Keymap::is_empty`, `CommandRegistry::{is_empty, len, names}`, and the
+  `Editor::cursor_settled` synonym for `after_edit`.
+
 ### Known gaps
 - Multi-key insert mappings are not implemented.
 - The `:` command line has no cursor movement (no arrows, no history).

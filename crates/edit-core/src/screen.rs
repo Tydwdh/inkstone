@@ -46,11 +46,6 @@ impl Viewport {
     pub fn text_rows(&self) -> u16 {
         self.height.saturating_sub(CHROME_ROWS)
     }
-
-    /// The last buffer line visible in this viewport (inclusive).
-    pub fn bottom_line(&self) -> usize {
-        self.top_line + self.text_rows().saturating_sub(1) as usize
-    }
 }
 
 /// Scroll `vp` the minimum amount needed to bring `cur` back into view.
@@ -102,7 +97,6 @@ mod tests {
     fn viewport_geometry() {
         let vp = Viewport::new(80, 24);
         assert_eq!(vp.text_rows(), 22);
-        assert_eq!(vp.bottom_line(), 21);
 
         let tiny = Viewport::new(80, 1);
         assert_eq!(tiny.text_rows(), 0);

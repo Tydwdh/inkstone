@@ -235,22 +235,6 @@ impl Grid {
         }
     }
 
-    /// Resize in place, reusing whatever cells overlap and blanking the rest.
-    pub fn resize(&mut self, width: u16, height: u16) {
-        if self.width == width && self.height == height {
-            return;
-        }
-        let mut next = Grid::new(width, height);
-        let copy_w = self.width.min(width) as usize;
-        let copy_h = self.height.min(height) as usize;
-        for y in 0..copy_h {
-            for x in 0..copy_w {
-                next.put(x as u16, y as u16, self.get(x as u16, y as u16).clone());
-            }
-        }
-        *self = next;
-    }
-
     pub fn in_bounds(&self, x: u16, y: u16) -> bool {
         x < self.width && y < self.height
     }
@@ -314,22 +298,6 @@ where
     M: Serialize,
 {
     let payload = rmp_serde::to_vec_named(msg)?;
-    let len = u32::try_from(payload.len()).map_err(|_| RpcError::FrameTooLarge(u32::MAX))?;
-    if len > MAX_FRAME_LEN {
-        return Err(RpcError::FrameTooLarge(len));
-    }
-    w.write_all(&len.to_be_bytes())?;
-    w.write_all(&payload)?;
-    Ok(())
-}
-
-/// Encode a frame using positional (non named) MessagePack encoding.
-pub fn write_msg_compact<W, M>(w: &mut W, msg: &M) -> Result<()>
-where
-    W: Write,
-    M: Serialize,
-{
-    let payload = rmp_serde::to_vec(msg)?;
     let len = u32::try_from(payload.len()).map_err(|_| RpcError::FrameTooLarge(u32::MAX))?;
     if len > MAX_FRAME_LEN {
         return Err(RpcError::FrameTooLarge(len));
@@ -478,16 +446,6 @@ mod tests {
     }
 
     #[test]
-    fn client_messages_round_trip_compact() {
-        for msg in client_samples() {
-            let mut buf = Vec::new();
-            write_msg_compact(&mut buf, &msg).unwrap();
-            let decoded: ClientMsg = read_msg(&mut Cursor::new(&buf)).unwrap().unwrap();
-            assert_eq!(msg, decoded);
-        }
-    }
-
-    #[test]
     fn server_messages_round_trip_named() {
         for msg in server_samples() {
             let mut buf = Vec::new();
@@ -557,9 +515,10 @@ mod tests {
         assert!(grid.get(1, 0).is_continuation());
         assert_eq!(grid.row_text(0), "好z");
 
-        grid.resize(2, 2);
-        assert_eq!(grid.width, 2);
-        assert_eq!(grid.height, 2);
-        assert_eq!(grid.get(0, 0).text, "好");
+        // A grid is a value: replacing it is a plain assignment.
+        let bigger = Grid::new(2, 2);
+        assert_eq!(bigger.width, 2);
+        assert_eq!(bigger.height, 2);
+        assert_eq!(bigger.row_text(0), "  ");
     }
 }

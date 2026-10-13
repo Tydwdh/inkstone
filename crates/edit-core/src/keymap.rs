@@ -187,10 +187,6 @@ impl Keymap {
         out.sort_by(|a, b| a.0.name().cmp(b.0.name()).then(a.1.cmp(&b.1)));
         out
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.maps.is_empty()
-    }
 }
 
 /// Parse a key notation string into the keys it denotes.

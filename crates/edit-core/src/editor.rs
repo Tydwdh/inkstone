@@ -189,17 +189,14 @@ impl Editor {
 
     // -- helpers used by commands ------------------------------------------
 
-    /// The buffer changed: re-clamp the cursor, scroll and schedule a redraw.
+    /// Call after anything that may have moved the cursor or changed the
+    /// buffer: it re-clamps the cursor, scrolls it back into view and marks the
+    /// screen dirty.
     pub fn after_edit(&mut self) {
         self.cursor.clamp(&self.buffer);
         self.clamp_normal_cursor();
         self.reposition();
         self.redraw = true;
-    }
-
-    /// The cursor moved: same bookkeeping as [`Editor::after_edit`].
-    pub fn cursor_settled(&mut self) {
-        self.after_edit();
     }
 
     fn reposition(&mut self) {
@@ -854,7 +851,7 @@ mod tests {
         ed.handle_resize(20, 4);
         ed.buffer = Buffer::from_text(&"0123456789".repeat(10));
         ed.cursor = Cursor::new(0, 99);
-        ed.cursor_settled();
+        ed.after_edit();
 
         let out = ed.compose();
         assert!(out.cursor_visible);
@@ -877,7 +874,7 @@ mod tests {
         ed.handle_resize(20, 4);
         ed.buffer = Buffer::from_text(&"0123456789".repeat(10));
         ed.cursor = Cursor::new(0, 99);
-        ed.cursor_settled();
+        ed.after_edit();
 
         let out = ed.compose();
         assert_eq!(out.cursor, (19, 0));

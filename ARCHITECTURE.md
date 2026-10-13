@@ -139,8 +139,8 @@ key that runs a `:` command does not erase what it just reported.
   deserves a default key, and add a row to the README's keymap table (a test
   compares that table to the built-in keymap).
 - **A new motion**: implement the movement on `Cursor` (pure, buffer in,
-  position out), then a command that calls it and ends with
-  `cursor_settled()`.
+  position out), then a command that calls it and ends with `after_edit()`,
+  which re-clamps the cursor, scrolls it into view and marks the screen dirty.
 - **A new message**: add it to `ClientMsg`/`ServerMsg`, handle it in
   `Session::handle`. Frontends are free to ignore anything they do not know.
 - **A new frontend**: implement the framing, blit `Grid`, forward terminal keys

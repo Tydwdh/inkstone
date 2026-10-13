@@ -161,6 +161,9 @@ never firing.
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) states the invariants and contracts that
 cross those boundaries, and where to add the next thing.
+[`AGENTS.md`](AGENTS.md) is the orientation for whoever works on it next
+(including agents), and [`docs/roadmap.md`](docs/roadmap.md) is what is planned
+and what each piece of it has to respect.
 
 ## Tests
 

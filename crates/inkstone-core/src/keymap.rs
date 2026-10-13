@@ -17,6 +17,7 @@ use crate::mode::Mode;
 /// The separator between encoded keys in a sequence.
 const SEQ_SEP: char = ' ';
 
+/// Key notation that does not parse. The message says what was wrong.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("bad key notation: {0}")]
 pub struct KeyParseError(pub String);
@@ -35,10 +36,12 @@ pub enum Lookup {
 /// The command sequence a key bindings runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
+    /// Command names, resolved against the registry and then against Lua.
     pub commands: Vec<String>,
 }
 
 impl Binding {
+    /// A binding that runs `commands` in order.
     pub fn new(commands: Vec<String>) -> Self {
         Self { commands }
     }
@@ -51,6 +54,7 @@ pub struct Keymap {
 }
 
 impl Keymap {
+    /// An empty keymap.
     pub fn new() -> Self {
         Self::default()
     }

@@ -28,6 +28,7 @@ pub struct Viewport {
 }
 
 impl Viewport {
+    /// A viewport of the given size, scrolled to the start of the buffer.
     pub fn new(width: u16, height: u16) -> Self {
         Self {
             top_line: 0,
@@ -37,6 +38,8 @@ impl Viewport {
         }
     }
 
+    /// The terminal changed size. The scroll position is left alone; whoever resizes
+    /// is expected to scroll the cursor back into view afterwards.
     pub fn resize(&mut self, width: u16, height: u16) {
         self.width = width;
         self.height = height;

@@ -30,12 +30,17 @@ use unicode_segmentation::UnicodeSegmentation;
 /// boundary. Long enough for any realistic emoji ZWJ cluster.
 const GRAPHEME_LOOKBACK: usize = 64;
 
+/// Everything that can go wrong loading or saving a document.
 #[derive(Debug, thiserror::Error)]
 pub enum BufferError {
+    /// The file could not be read or written.
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
+    /// The file exists but is not UTF-8, so it is not text this editor can
+    /// model losslessly.
     #[error("{}: not valid UTF-8", .0.display())]
     NotUtf8(PathBuf),
+    /// A write was attempted on a buffer that has never had a path.
     #[error("E32: No file name")]
     NoPath,
 }
@@ -108,10 +113,12 @@ impl Buffer {
 
     // -- accessors ----------------------------------------------------------
 
+    /// Where this buffer came from, if anywhere. `None` means a scratch buffer.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
+    /// Whether it has been changed since the last load or save.
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -125,20 +132,24 @@ impl Buffer {
             .unwrap_or_else(|| "[No Name]".to_string())
     }
 
+    /// The whole document as it would be written to disk.
     pub fn text(&self) -> String {
         self.rope.to_string()
     }
 
+    /// Length in characters, terminator included.
     pub fn len_chars(&self) -> usize {
         self.rope.len_chars()
     }
 
+    /// Number of lines; an empty buffer has one.
     pub fn line_count(&self) -> usize {
         // ropey counts the phantom line after a trailing newline; the invariant
         // guarantees a trailing newline, so there is always at least one line.
         self.rope.len_lines() - 1
     }
 
+    /// The character at `idx`, or `None` past the end.
     pub fn char_at(&self, idx: usize) -> Option<char> {
         self.rope.get_char(idx)
     }
@@ -159,6 +170,7 @@ impl Buffer {
         self.rope.line(i).len_chars() - self.line_len(i)
     }
 
+    /// Line `i` as an owned string, for callers that need to keep it.
     pub fn line_string(&self, i: usize) -> String {
         self.line(i).to_string()
     }
@@ -168,6 +180,10 @@ impl Buffer {
         self.line(i).len_chars()
     }
 
+    /// Turn a character index into a `(line, column)` position.
+    ///
+    /// A position inside a terminator reports as the end of its line, so a
+    /// caller can never get a column past [`Buffer::line_len`].
     pub fn char_to_line_col(&self, char_idx: usize) -> (usize, usize) {
         let len = self.len_chars();
         if len == 0 {
@@ -184,6 +200,9 @@ impl Buffer {
         (line, idx - start)
     }
 
+    /// Turn a `(line, column)` position into a character index, clamping both.
+    ///
+    /// A column of `line_len(line)` is the position of that line's terminator.
     pub fn line_col_to_char(&self, line: usize, col: usize) -> usize {
         if line >= self.line_count() {
             return self.len_chars().saturating_sub(1);

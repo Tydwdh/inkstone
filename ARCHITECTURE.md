@@ -4,6 +4,10 @@ What crosses each boundary in `inkstone`, and the invariants that hold on the ot
 side of it. Everything here is enforced by tests; the point of writing it down
 is that a new feature has to respect these, not rediscover them.
 
+> Working on the code? Start with [`AGENTS.md`](AGENTS.md) (commands, rules,
+> what CI cannot check) and [`docs/roadmap.md`](docs/roadmap.md) (what is next,
+> and the constraints it inherits from here).
+
 ## Processes and threads
 
 `inkstone` (frontend) spawns `inkstone-server` (daemon) as a child and talks to it over

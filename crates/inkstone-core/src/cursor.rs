@@ -36,13 +36,18 @@ fn class(c: char) -> Class {
     }
 }
 
+/// Where the cursor is, in logical coordinates. See the module docs for what
+/// `col` means, and for how the two modes differ.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Cursor {
+    /// Buffer line.
     pub row: usize,
+    /// Column within that line, as described in the module docs.
     pub col: usize,
 }
 
 impl Cursor {
+    /// A cursor at `(row, col)`, without checking that it is anywhere valid.
     pub fn new(row: usize, col: usize) -> Self {
         Self { row, col }
     }
@@ -58,12 +63,14 @@ impl Cursor {
         buf.line_col_to_char(self.row, self.col)
     }
 
+    /// Move to a character index, clamping it into the buffer.
     pub fn set_char_idx(&mut self, buf: &Buffer, char_idx: usize) {
         let (row, col) = buf.char_to_line_col(char_idx);
         self.row = row;
         self.col = col;
     }
 
+    /// One column left, wrapping to the end of the line above.
     pub fn move_left(&mut self, buf: &Buffer) {
         if self.col > 0 {
             self.col -= 1;
@@ -73,6 +80,7 @@ impl Cursor {
         }
     }
 
+    /// One column right, wrapping to the start of the line below.
     pub fn move_right(&mut self, buf: &Buffer) {
         if self.col < buf.line_len(self.row) {
             self.col += 1;
@@ -82,6 +90,7 @@ impl Cursor {
         }
     }
 
+    /// One line up, clamping the column to the shorter line.
     pub fn move_up(&mut self, buf: &Buffer) {
         if self.row > 0 {
             self.row -= 1;
@@ -89,6 +98,7 @@ impl Cursor {
         }
     }
 
+    /// One line down, clamping the column to the shorter line.
     pub fn move_down(&mut self, buf: &Buffer) {
         if self.row + 1 < buf.line_count() {
             self.row += 1;
@@ -96,6 +106,7 @@ impl Cursor {
         }
     }
 
+    /// To the first column of the current line.
     pub fn move_line_start(&mut self, _buf: &Buffer) {
         self.col = 0;
     }
@@ -185,6 +196,7 @@ impl Cursor {
         self.col = 0;
     }
 
+    /// To the start of the first line (vim's `gg`).
     pub fn goto_first_line(&mut self, _buf: &Buffer) {
         self.row = 0;
         self.col = 0;

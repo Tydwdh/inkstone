@@ -13,6 +13,8 @@
 //! ([`Grid`], [`Cell`], [`Color`]) so that the daemon and every frontend agree
 //! on it byte-for-byte.
 
+#![warn(missing_docs)]
+
 use std::io::{self, Read, Write};
 
 use serde::de::DeserializeOwned;
@@ -35,16 +37,22 @@ cell_attributes! {
 /// Errors produced while encoding, decoding, or framing a message.
 #[derive(Debug, thiserror::Error)]
 pub enum RpcError {
+    /// The Lua VM could not be set up, or a chunk failed to run.
     #[error("i/o error: {0}")]
     Io(#[from] io::Error),
+    /// A message could not be encoded.
     #[error("failed to encode message: {0}")]
     Encode(#[from] rmp_serde::encode::Error),
+    /// A frame could not be decoded.
     #[error("failed to decode message: {0}")]
     Decode(#[from] rmp_serde::decode::Error),
+    /// A length prefix claimed more than [`MAX_FRAME_LEN`] bytes, which means
+    /// the stream is corrupt or hostile.
     #[error("frame of {0} bytes exceeds the {MAX_FRAME_LEN} byte limit")]
     FrameTooLarge(u32),
 }
 
+/// What this crate's functions return.
 pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 
 // ---------------------------------------------------------------------------
@@ -53,6 +61,8 @@ pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 
 key_codes! {
     data {
+        /// A character key. Its notation is the character itself, which is why
+        /// it declares a representative rather than spellings.
         Char(char) => 'a',
     }
     keys {
@@ -88,19 +98,25 @@ key_codes! {
 /// A modifier held while a key was pressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mod {
+    /// Control.
     Ctrl,
+    /// Alt, or Option on a Mac.
     Alt,
+    /// Shift.
     Shift,
 }
 
 /// A key press: a key code plus the modifiers that were down.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyMsg {
+    /// Which key.
     pub code: KeyCode,
+    /// Modifiers that were held while it was pressed.
     pub mods: Vec<Mod>,
 }
 
 impl KeyMsg {
+    /// The key on its own, with no modifiers.
     pub fn new(code: KeyCode) -> Self {
         Self {
             code,
@@ -108,6 +124,7 @@ impl KeyMsg {
         }
     }
 
+    /// A character key with Control held.
     pub fn ctrl(c: char) -> Self {
         Self {
             code: KeyCode::Char(c),
@@ -115,10 +132,12 @@ impl KeyMsg {
         }
     }
 
+    /// Whether Control was held.
     pub fn is_ctrl(&self) -> bool {
         self.mods.contains(&Mod::Ctrl)
     }
 
+    /// Whether Alt was held.
     pub fn is_alt(&self) -> bool {
         self.mods.contains(&Mod::Alt)
     }
@@ -127,9 +146,13 @@ impl KeyMsg {
 /// A scalar argument to a programmatic command invocation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Param {
+    /// No value. Also how a script says "unbind" to `ed.map`.
     Nil,
+    /// A boolean.
     Bool(bool),
+    /// An integer. A command treats a positive first parameter as a repeat count.
     Int(i64),
+    /// A string, usually a path or a command name.
     Str(String),
 }
 
@@ -164,9 +187,23 @@ impl From<&str> for Param {
 /// Frontend → daemon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClientMsg {
+    /// A key was pressed.
     Input(KeyMsg),
-    Resize { cols: u16, rows: u16 },
-    Command { name: String, params: Vec<Param> },
+    /// The terminal changed size.
+    Resize {
+        /// New width in columns.
+        cols: u16,
+        /// New height in rows.
+        rows: u16,
+    },
+    /// Run a command by name, as if it had been typed.
+    Command {
+        /// The command to run.
+        name: String,
+        /// Its arguments.
+        params: Vec<Param>,
+    },
+    /// The frontend is going away; end the session.
     Shutdown,
 }
 
@@ -192,9 +229,14 @@ pub enum Color {
 /// grid is always self-describing and needs no clearing beforehand.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Cell {
+    /// The glyph here, one grapheme cluster. Empty means a continuation cell;
+    /// see [`Cell::is_continuation`].
     pub text: String,
+    /// Foreground colour.
     pub fg: Color,
+    /// Background colour.
     pub bg: Color,
+    /// Attribute bits, from [`ATTRS`].
     pub attrs: u16,
 }
 
@@ -217,16 +259,19 @@ impl Cell {
         }
     }
 
+    /// Set the foreground colour.
     pub fn with_fg(mut self, fg: Color) -> Self {
         self.fg = fg;
         self
     }
 
+    /// Set the background colour.
     pub fn with_bg(mut self, bg: Color) -> Self {
         self.bg = bg;
         self
     }
 
+    /// Set the attribute bits.
     pub fn with_attrs(mut self, attrs: u16) -> Self {
         self.attrs = attrs;
         self
@@ -241,13 +286,16 @@ impl Cell {
 /// A row-major grid of [`Cell`]s: the entire screen, as computed by the daemon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Grid {
+    /// Screen columns.
     pub width: u16,
+    /// Screen rows.
     pub height: u16,
     /// `width * height` cells, row-major.
     pub cells: Vec<Cell>,
 }
 
 impl Grid {
+    /// A grid of blank cells, which is to say spaces.
     pub fn new(width: u16, height: u16) -> Self {
         Self {
             width,
@@ -256,14 +304,18 @@ impl Grid {
         }
     }
 
+    /// Whether `(x, y)` is inside the grid.
     pub fn in_bounds(&self, x: u16, y: u16) -> bool {
         x < self.width && y < self.height
     }
 
+    /// The cell at `(x, y)`. Panics when out of bounds.
     pub fn get(&self, x: u16, y: u16) -> &Cell {
         &self.cells[y as usize * self.width as usize + x as usize]
     }
 
+    /// Replace the cell at `(x, y)`. Out-of-bounds writes are ignored, which
+    /// is what lets the renderer draw wide graphemes without edge cases.
     pub fn put(&mut self, x: u16, y: u16, cell: Cell) {
         if self.in_bounds(x, y) {
             self.cells[y as usize * self.width as usize + x as usize] = cell;
@@ -300,11 +352,16 @@ impl Grid {
 /// Daemon → frontend.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ServerMsg {
+    /// The whole screen. A frontend only ever needs to blit this.
     Redraw {
+        /// What to draw.
         grid: Grid,
+        /// Where the terminal cursor belongs, in screen coordinates.
         cursor: (u16, u16),
+        /// Whether to show the cursor at all.
         cursor_visible: bool,
     },
+    /// The session is over; the frontend should restore the terminal and exit.
     Quit,
 }
 
@@ -353,18 +410,22 @@ where
 
 // Typed convenience wrappers.
 
+/// Write one frontend-to-daemon frame.
 pub fn write_client_msg<W: Write>(w: &mut W, msg: &ClientMsg) -> Result<()> {
     write_msg(w, msg)
 }
 
+/// Write one daemon-to-frontend frame.
 pub fn write_server_msg<W: Write>(w: &mut W, msg: &ServerMsg) -> Result<()> {
     write_msg(w, msg)
 }
 
+/// Read one frontend-to-daemon frame. `Ok(None)` means the peer went away.
 pub fn read_client_msg<R: Read>(r: &mut R) -> Result<Option<ClientMsg>> {
     read_msg(r)
 }
 
+/// Read one daemon-to-frontend frame. `Ok(None)` means the peer went away.
 pub fn read_server_msg<R: Read>(r: &mut R) -> Result<Option<ServerMsg>> {
     read_msg(r)
 }

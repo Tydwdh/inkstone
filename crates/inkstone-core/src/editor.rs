@@ -35,24 +35,40 @@ use crate::CoreError;
 /// Guard against a Lua command calling itself forever.
 pub const MAX_COMMAND_DEPTH: usize = 100;
 
+/// The editor: the document, the cursor, the mode and everything the commands
+/// operate on.
+///
+/// It does no I/O and owns no terminal, so a test can drive it key by key and
+/// inspect the screen it composes.
 pub struct Editor {
+    /// The document.
     pub buffer: Buffer,
+    /// Where we are in it.
     pub cursor: Cursor,
+    /// What a key means right now.
     pub mode: Mode,
+    /// Which part of the document is on screen.
     pub viewport: Viewport,
     /// The `:` command line being typed.
     pub cmdline: String,
     /// Transient status message shown on the bottom row.
     pub message: String,
+    /// The built-in commands.
     pub registry: CommandRegistry,
+    /// What keys do. Shared with the Lua host, so a script can remap at any
+    /// time.
     pub keymap: Rc<RefCell<Keymap>>,
+    /// Settings, shared with the Lua host for the same reason.
     pub options: Rc<RefCell<Options>>,
     /// Keys of a partially-typed multi-key binding (`d` waiting for `d`).
     pub pending: String,
+    /// Set by a command that wants the session to end; the daemon turns it
+    /// into an [`inkstone_rpc::ServerMsg::Quit`].
     pub should_quit: bool,
     /// Set whenever the screen may have changed; the daemon uses it to decide
     /// whether to emit a redraw.
     pub redraw: bool,
+    /// The script host.
     pub lua: LuaHost,
 }
 

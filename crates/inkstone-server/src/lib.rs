@@ -6,6 +6,8 @@
 //! pure, blocking-free function so it can be driven from a test without
 //! spawning a process or a thread.
 
+#![warn(missing_docs)]
+
 use std::io::{BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::thread;
@@ -53,14 +55,17 @@ pub struct Session {
 }
 
 impl Session {
+    /// Wrap an editor in a session.
     pub fn new(editor: Editor) -> Self {
         Self { editor }
     }
 
+    /// The editor, for inspection.
     pub fn editor(&self) -> &Editor {
         &self.editor
     }
 
+    /// The editor, for mutation — a test driving a session needs this.
     pub fn editor_mut(&mut self) -> &mut Editor {
         &mut self.editor
     }

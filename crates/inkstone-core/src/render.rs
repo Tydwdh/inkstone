@@ -28,9 +28,14 @@ use crate::screen::Viewport;
 
 /// Everything `compose` needs. Borrowed: composing never mutates editor state.
 pub struct View<'a> {
+    /// The document to draw.
     pub buffer: &'a Buffer,
+    /// Where the cursor is, in the buffer.
     pub cursor: Cursor,
+    /// The mode: it decides what the status line says and how the command line is
+    /// drawn.
     pub mode: Mode,
+    /// Which part of the buffer, and of each line, is on screen.
     pub viewport: Viewport,
     /// Columns a tab advances to.
     pub tabstop: usize,
@@ -47,6 +52,7 @@ pub struct View<'a> {
 /// The result of composing a screen.
 #[derive(Debug, Clone)]
 pub struct Composed {
+    /// The screen.
     pub grid: Grid,
     /// Cursor position in screen coordinates.
     pub cursor: (u16, u16),

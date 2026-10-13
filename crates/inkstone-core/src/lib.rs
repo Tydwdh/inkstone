@@ -5,6 +5,8 @@
 //! daemon (`inkstone-server`) drives this crate over RPC and the frontend (`inkstone`)
 //! only draws what the daemon computes.
 
+#![warn(missing_docs)]
+
 #[macro_use]
 mod macros;
 
@@ -34,8 +36,10 @@ pub use settings::{Options, Setting, SettingValue};
 /// Errors from setting up or driving the editor kernel.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    /// The Lua VM could not be created, or a chunk failed.
     #[error("lua error: {0}")]
     Lua(#[from] mlua::Error),
+    /// Anything else, already formatted for the user.
     #[error("{0}")]
     Message(String),
 }

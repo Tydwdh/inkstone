@@ -42,6 +42,10 @@ type LuaCommands = Rc<RefCell<HashMap<String, Function>>>;
 /// Commands a Lua callback asked for, in order, to run once it returns.
 type PendingCalls = Rc<RefCell<VecDeque<(String, Vec<Param>)>>>;
 
+/// The Lua VM, and the handles that let scripts reach the editor.
+///
+/// See the module docs for why script calls are queued rather than borrowing the
+/// editor.
 pub struct LuaHost {
     lua: Lua,
     keymap: Rc<RefCell<Keymap>>,

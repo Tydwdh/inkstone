@@ -16,16 +16,25 @@ use inkstone_rpc::Param;
 use crate::editor::Editor;
 use crate::mode::Mode;
 
+/// What a command returns: `Err` carries the message the user should see.
 pub type Result<T, E = CommandError> = std::result::Result<T, E>;
 
+/// Why a command did not run.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CommandError {
+    /// No command by that name, in the registry or in Lua.
     #[error("E492: Not a command: {0}")]
     Unknown(String),
+    /// The command ran and refused, for example a write that failed. The message is
+    /// shown to the user as-is.
     #[error("{0}")]
     Failed(String),
 }
 
+/// The shape of every built-in command.
+///
+/// Plain functions, not closures, which is why the registry stays a table a script
+/// layer can enumerate and dispatch into.
 pub type CommandFn = fn(&mut Editor, &[Param]) -> Result<()>;
 
 /// The set of built-in commands.
@@ -80,10 +89,15 @@ impl CommandRegistry {
         edit_file_force,
     }
 
+    /// Install (or replace) a command.
+    ///
+    /// Built-ins go through the `commands!` macro instead, so the name and the
+    /// function cannot disagree.
     pub fn register(&mut self, name: &'static str, f: CommandFn) {
         self.map.insert(name, f);
     }
 
+    /// Whether a command by this name exists.
     pub fn contains(&self, name: &str) -> bool {
         self.map.contains_key(name)
     }

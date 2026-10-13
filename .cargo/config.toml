@@ -1,0 +1,4 @@
+# Windows/企业网环境：crates.io 走代理时 schannel 吊销检查常离线失败，
+# 导致 `cargo fetch` 报 CRYPT_E_REVOCATION_OFFLINE。关闭吊销检查。
+[http]
+check-revoke = false

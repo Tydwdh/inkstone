@@ -1,0 +1,8 @@
+# Keep the working tree, the index and every checkout on LF, whatever the
+# machine's core.autocrlf says. Rust source is LF everywhere.
+* text=auto eol=lf
+
+# Binary formats that must never be line-ending converted.
+*.png binary
+*.ico binary
+*.exe binary

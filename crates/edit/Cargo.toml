@@ -1,0 +1,18 @@
+[package]
+name = "edit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "edit: modal terminal editor (crossterm frontend + launcher)"
+
+[[bin]]
+name = "edit"
+path = "src/main.rs"
+
+[dependencies]
+edit-rpc.workspace = true
+crossterm.workspace = true
+crossbeam-channel.workspace = true
+anyhow.workspace = true
+clap.workspace = true

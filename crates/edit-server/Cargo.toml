@@ -1,0 +1,22 @@
+[package]
+name = "edit-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Headless edit daemon: owns the editor state and speaks msgpack RPC over stdio"
+
+[lib]
+name = "edit_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "edit-server"
+path = "src/main.rs"
+
+[dependencies]
+edit-core.workspace = true
+edit-rpc.workspace = true
+crossbeam-channel.workspace = true
+anyhow.workspace = true
+clap.workspace = true

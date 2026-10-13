@@ -1,0 +1,16 @@
+[package]
+name = "edit-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Editor core: buffer, modes, command registry, keymap, render model, Lua host"
+
+[dependencies]
+edit-rpc.workspace = true
+ropey.workspace = true
+mlua.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+directories.workspace = true
+thiserror.workspace = true

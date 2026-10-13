@@ -62,6 +62,8 @@ impl CommandRegistry {
         registry.register("move_line_end", cmd_move_line_end);
         registry.register("goto_first_line", cmd_goto_first_line);
         registry.register("goto_last_line", cmd_goto_last_line);
+        registry.register("page_up", cmd_page_up);
+        registry.register("page_down", cmd_page_down);
         registry.register("enter_insert", cmd_enter_insert);
         registry.register("enter_insert_before", cmd_enter_insert_before);
         registry.register("append", cmd_append);
@@ -217,6 +219,29 @@ fn cmd_goto_first_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 
 fn cmd_goto_last_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.goto_last_line(&editor.buffer);
+    editor.cursor_settled();
+    Ok(())
+}
+
+/// How far a page scroll moves: one screen less a line of overlap, so the
+/// reader keeps their bearings. A repeat count scrolls that many screens.
+fn page_step(editor: &Editor, params: &[Param]) -> usize {
+    let rows = editor.viewport.text_rows() as usize;
+    rows.saturating_sub(1).max(1) * count(params)
+}
+
+fn cmd_page_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    for _ in 0..page_step(editor, params) {
+        editor.cursor.move_down(&editor.buffer);
+    }
+    editor.cursor_settled();
+    Ok(())
+}
+
+fn cmd_page_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    for _ in 0..page_step(editor, params) {
+        editor.cursor.move_up(&editor.buffer);
+    }
     editor.cursor_settled();
     Ok(())
 }

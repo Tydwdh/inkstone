@@ -140,6 +140,67 @@ fn shutdown_ends_the_session_without_a_frame() {
     assert!(response.messages.is_empty());
 }
 
+/// The arrow keys, as the frontend sends them: this is the wire contract for
+/// every navigation key, in insert mode, where they used to do nothing at all.
+#[test]
+fn navigation_keys_work_in_insert_mode_over_the_wire() {
+    let mut session = session();
+    session.handle(ClientMsg::Resize { cols: 20, rows: 6 });
+
+    let mut keys = vec![typed('i')];
+    keys.extend(type_str("ab"));
+    keys.push(pressed(KeyCode::Enter));
+    keys.extend(type_str("cd"));
+    let grid = last_redraw(&mut session, keys);
+    assert_eq!(grid.row_text(0).trim_end(), "ab");
+    assert_eq!(grid.row_text(1).trim_end(), "cd");
+
+    // Left then Up: the cursor walks to the start of the line above.
+    let mut keys = vec![pressed(KeyCode::Left), pressed(KeyCode::Up)];
+    keys.push(pressed(KeyCode::Home));
+    let grid = last_redraw(&mut session, keys);
+    assert_eq!(grid.row_text(0).trim_end(), "ab", "navigation never edits");
+
+    // `End` lands on `b`, `Left` steps back onto `a`, `Delete` eats it.
+    let grid = last_redraw(
+        &mut session,
+        vec![
+            pressed(KeyCode::End),
+            pressed(KeyCode::Left),
+            pressed(KeyCode::Delete),
+        ],
+    );
+    assert_eq!(grid.row_text(0).trim_end(), "b");
+    assert_eq!(grid.row_text(1).trim_end(), "cd");
+    match last_redraw_reply(&mut session, vec![pressed(KeyCode::Esc)]) {
+        ServerMsg::Redraw { cursor, grid, .. } => {
+            assert_eq!(
+                cursor,
+                (0, 0),
+                "the cursor is on screen: {:?}",
+                grid.row_text(0)
+            );
+        }
+        other => panic!("expected a redraw, got {other:?}"),
+    }
+}
+
+fn last_redraw_reply(session: &mut Session, msgs: Vec<ClientMsg>) -> ServerMsg {
+    let mut latest = None;
+    for msg in msgs {
+        let response = session.handle(msg);
+        if let Some(msg) = response
+            .messages
+            .into_iter()
+            .rev()
+            .find(|m| matches!(m, ServerMsg::Redraw { .. }))
+        {
+            latest = Some(msg);
+        }
+    }
+    latest.expect("no redraw was produced")
+}
+
 #[test]
 fn a_resize_after_editing_keeps_the_text() {
     let mut session = session();

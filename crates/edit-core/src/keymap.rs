@@ -86,12 +86,35 @@ impl Keymap {
             ("<Down>", &["move_down"]),
             ("<Home>", &["move_line_start"]),
             ("<End>", &["move_line_end"]),
-            ("<PageUp>", &["move_up"]),
-            ("<PageDown>", &["move_down"]),
+            ("<PageUp>", &["page_up"]),
+            ("<PageDown>", &["page_down"]),
         ];
         for (lhs, commands) in normal {
             km.insert(
                 Mode::Normal,
+                lhs,
+                commands.iter().map(|c| c.to_string()).collect(),
+            )
+            .expect("built-in bindings are valid");
+        }
+
+        // Insert mode must not swallow the navigation keys: a user typing text
+        // still expects to be able to move around. These are ordinary bindings,
+        // so `ed.map("i", ...)` overrides them like any other.
+        let insert: &[(&str, &[&str])] = &[
+            ("<Left>", &["move_left"]),
+            ("<Right>", &["move_right"]),
+            ("<Up>", &["move_up"]),
+            ("<Down>", &["move_down"]),
+            ("<Home>", &["move_line_start"]),
+            ("<End>", &["move_line_end"]),
+            ("<PageUp>", &["page_up"]),
+            ("<PageDown>", &["page_down"]),
+            ("<Del>", &["delete_char"]),
+        ];
+        for (lhs, commands) in insert {
+            km.insert(
+                Mode::Insert,
                 lhs,
                 commands.iter().map(|c| c.to_string()).collect(),
             )
@@ -112,7 +135,15 @@ impl Keymap {
         lhs: &str,
         commands: Vec<String>,
     ) -> Result<(), KeyParseError> {
-        let seq = encode_sequence(&parse_key(lhs)?);
+        let keys = parse_key(lhs)?;
+        // Insert mode resolves one key at a time (typing must stay immediate),
+        // so a multi-key mapping there would silently never fire. Say so instead.
+        if mode == Mode::Insert && keys.len() > 1 {
+            return Err(KeyParseError(format!(
+                "insert-mode mappings must be a single key, got {lhs:?}"
+            )));
+        }
+        let seq = encode_sequence(&keys);
         if commands.is_empty() {
             self.maps.remove(&(mode, seq));
         } else {
@@ -390,6 +421,33 @@ mod tests {
     }
 
     #[test]
+    fn navigation_keys_are_bound_in_both_modes() {
+        let km = Keymap::with_defaults();
+        for lhs in [
+            "<Left>",
+            "<Right>",
+            "<Up>",
+            "<Down>",
+            "<Home>",
+            "<End>",
+            "<PageUp>",
+            "<PageDown>",
+            "<Del>",
+        ] {
+            assert!(
+                matches!(km.lookup(Mode::Normal, lhs), Lookup::Exact(_)),
+                "{lhs} is unbound in normal mode"
+            );
+            assert!(
+                matches!(km.lookup(Mode::Insert, lhs), Lookup::Exact(_)),
+                "{lhs} is unbound in insert mode"
+            );
+        }
+        // Typing still wins for ordinary characters.
+        assert_eq!(km.lookup(Mode::Insert, "h"), Lookup::None);
+    }
+
+    #[test]
     fn defaults_lookup_exactly_and_by_prefix() {
         let km = Keymap::with_defaults();
         assert_eq!(
@@ -405,6 +463,21 @@ mod tests {
         assert_eq!(km.lookup(Mode::Normal, "z"), Lookup::None);
         assert_eq!(km.lookup(Mode::Insert, "h"), Lookup::None);
         assert_eq!(km.lookup(Mode::Normal, "d z"), Lookup::None);
+    }
+
+    #[test]
+    fn insert_mode_rejects_multi_key_mappings() {
+        // `ed.map("i", "jk", "<Esc>")` cannot work yet: it must not be accepted
+        // and then quietly ignored.
+        let mut km = Keymap::with_defaults();
+        let err = km
+            .bind(Mode::Insert, "jk", vec!["escape".into()])
+            .unwrap_err();
+        assert!(err.to_string().contains("single key"), "{err}");
+        assert_eq!(km.lookup(Mode::Insert, "j"), Lookup::None);
+        // A single key is fine, and normal mode still takes sequences.
+        km.bind(Mode::Insert, "j", vec!["escape".into()]).unwrap();
+        km.bind(Mode::Normal, "jk", vec!["escape".into()]).unwrap();
     }
 
     #[test]

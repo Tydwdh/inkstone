@@ -329,10 +329,9 @@ impl Editor {
             KeyCode::Enter => self.insert_text("\n"),
             KeyCode::Tab => self.insert_text("\t"),
             KeyCode::Backspace => self.delete_backward(),
-            // Delete is the forward twin of backspace; it runs the same
-            // command normal mode's `x` does.
-            KeyCode::Delete => self.run_command("delete_char", &[]),
             KeyCode::Char(c) => self.insert_text(&c.to_string()),
+            // Everything else (arrows, Home/End, Delete, ...) is an ordinary
+            // insert-mode binding and was handled by the lookup above.
             _ => {}
         }
     }
@@ -761,6 +760,51 @@ mod tests {
         ed.cursor = Cursor::new(0, 1);
         feed(&mut ed, "i<Del><Esc>");
         assert_eq!(ed.buffer.text(), "ac\n");
+    }
+
+    #[test]
+    fn arrow_keys_move_the_cursor_in_insert_mode() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one\ntwo\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "i");
+        assert_eq!(ed.mode, Mode::Insert);
+
+        feed(&mut ed, "<Right><Down>");
+        assert_eq!(ed.cursor, Cursor::new(1, 1));
+        assert_eq!(
+            ed.mode,
+            Mode::Insert,
+            "navigating does not leave insert mode"
+        );
+        assert_eq!(ed.buffer.text(), "one\ntwo\n", "and it does not edit");
+
+        feed(&mut ed, "<Up><Left><Home><End>");
+        assert_eq!(ed.cursor, Cursor::new(0, 2));
+        assert_eq!(ed.mode, Mode::Insert);
+
+        // Typing after navigating inserts at the new position.
+        feed(&mut ed, "X<Esc>");
+        assert_eq!(ed.buffer.text(), "onXe\ntwo\n");
+    }
+
+    #[test]
+    fn page_keys_scroll_a_screenful() {
+        let mut ed = Editor::for_tests();
+        ed.handle_resize(20, 10); // 8 text rows
+        ed.buffer = Buffer::from_text(&"line\n".repeat(30));
+        ed.cursor = Cursor::new(0, 0);
+
+        feed(&mut ed, "<PageDown>");
+        assert_eq!(ed.cursor.row, 7, "one screen minus a line of overlap");
+        feed(&mut ed, "<PageDown>");
+        assert_eq!(ed.cursor.row, 14);
+        feed(&mut ed, "<PageUp>");
+        assert_eq!(ed.cursor.row, 7);
+        feed(&mut ed, "<PageDown><PageDown>");
+        assert_eq!(ed.cursor.row, 21);
+        feed(&mut ed, "<PageDown>");
+        assert_eq!(ed.cursor.row, 28, "clamped to the last line");
     }
 
     #[test]

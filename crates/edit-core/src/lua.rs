@@ -392,6 +392,20 @@ ed.set("tabstop", 8)
     }
 
     #[test]
+    fn an_insert_mapping_that_cannot_fire_is_rejected_at_load() {
+        let host_keymap = Rc::new(RefCell::new(Keymap::new()));
+        let host_options = Rc::new(RefCell::new(Options::default()));
+        let registry = CommandRegistry::with_builtins();
+        let host =
+            LuaHost::new(&registry, Rc::clone(&host_keymap), Rc::clone(&host_options)).unwrap();
+
+        let err = host
+            .load_str("test", r#"ed.map("i", "jk", "escape")"#)
+            .unwrap_err();
+        assert!(err.to_string().contains("single key"), "{err}");
+    }
+
+    #[test]
     fn bad_mappings_are_rejected() {
         let host_keymap = Rc::new(RefCell::new(Keymap::new()));
         let host_options = Rc::new(RefCell::new(Options::default()));

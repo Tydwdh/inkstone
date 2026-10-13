@@ -77,6 +77,7 @@ impl CommandRegistry {
         registry.register("save_quit", cmd_save_quit);
         registry.register("quit_force", cmd_quit_force);
         registry.register("edit_file", cmd_edit_file);
+        registry.register("edit_file_force", cmd_edit_file_force);
         registry
     }
 
@@ -249,11 +250,13 @@ fn cmd_append_eol(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 
 fn cmd_open_line_below(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let row = editor.cursor.row;
-    let after_line = editor
+    let end_of_content = editor
         .buffer
-        .line_col_to_char(row, editor.buffer.line_len(row))
-        + 1;
-    editor.buffer.insert(after_line, "\n");
+        .line_col_to_char(row, editor.buffer.line_len(row));
+    let terminator = open_line_terminator(editor, row);
+    editor
+        .buffer
+        .insert(end_of_content + terminator.chars().count(), &terminator);
     editor.cursor.row = row + 1;
     editor.cursor.col = 0;
     editor.mode = Mode::Insert;
@@ -264,7 +267,8 @@ fn cmd_open_line_below(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 fn cmd_open_line_above(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let row = editor.cursor.row;
     let start = editor.buffer.line_col_to_char(row, 0);
-    editor.buffer.insert(start, "\n");
+    let terminator = open_line_terminator(editor, row);
+    editor.buffer.insert(start, &terminator);
     editor.cursor.row = row;
     editor.cursor.col = 0;
     editor.mode = Mode::Insert;
@@ -272,15 +276,38 @@ fn cmd_open_line_above(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
+/// The terminator a newly opened line borrows from its neighbour, so that a
+/// CRLF file never sprouts a bare LF.
+fn open_line_terminator(editor: &Editor, row: usize) -> String {
+    let terminator = editor.buffer.line_terminator(row);
+    if terminator.is_empty() {
+        "\n".to_string()
+    } else {
+        terminator
+    }
+}
+
 fn cmd_delete_char(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
-        let idx = editor.cursor.char_idx(&editor.buffer);
-        let len = editor.buffer.len_chars();
-        // The final newline is untouchable: there is nothing after it to join.
-        if idx + 1 >= len {
-            break;
+        let row = editor.cursor.row;
+        let line_len = editor.buffer.line_len(row);
+        if editor.cursor.col >= line_len {
+            // Sitting on the terminator (only possible on an empty line):
+            // remove all of it and join with the line below. The last line has
+            // nothing to join to.
+            if row + 1 >= editor.buffer.line_count() {
+                break;
+            }
+            let start = editor.buffer.line_col_to_char(row, line_len);
+            let terminator = editor.buffer.line_terminator_len(row);
+            if terminator == 0 {
+                break;
+            }
+            editor.buffer.remove(start, start + terminator);
+        } else {
+            let idx = editor.cursor.char_idx(&editor.buffer);
+            editor.buffer.remove(idx, idx + 1);
         }
-        editor.buffer.remove(idx, idx + 1);
     }
     editor.after_edit();
     Ok(())
@@ -290,13 +317,9 @@ fn cmd_delete_line(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         let row = editor.cursor.row.min(editor.buffer.line_count() - 1);
         let start = editor.buffer.line_col_to_char(row, 0);
-        let end = start + editor.buffer.line_len(row) + 1;
-        // Removing the last line must also remove the newline before it.
-        let start = if row + 1 == editor.buffer.line_count() {
-            start.saturating_sub(1)
-        } else {
-            start
-        };
+        // Content plus its own terminator: enough to drop the whole line,
+        // whatever the terminator is, without disturbing the line before it.
+        let end = start + editor.buffer.line_len(row) + editor.buffer.line_terminator_len(row);
         editor.buffer.remove(start, end);
     }
     editor.after_edit();
@@ -357,6 +380,20 @@ fn cmd_save_quit(editor: &mut Editor, params: &[Param]) -> Result<()> {
 }
 
 fn cmd_edit_file(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    if editor.buffer.is_dirty() {
+        let msg = "E37: No write since last change (add ! to override)".to_string();
+        editor.message = msg.clone();
+        return Err(CommandError::Failed(msg));
+    }
+    reload_file(editor, params)
+}
+
+/// `:e!` — reload from disk, discarding unsaved changes on purpose.
+fn cmd_edit_file_force(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    reload_file(editor, params)
+}
+
+fn reload_file(editor: &mut Editor, params: &[Param]) -> Result<()> {
     let path = match path_param(params) {
         Some(p) => p.to_path_buf(),
         None => match editor.buffer.path() {

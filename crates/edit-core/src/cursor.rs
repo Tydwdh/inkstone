@@ -6,14 +6,34 @@
 //!
 //! `col` is an *insertion point*, so it ranges over `0..=line_len(row)`. A
 //! column of `line_len(row)` sits just past the last character, on the
-//! terminating newline. Normal mode does not clamp one character back (as vim
-//! does); the model stays uniform and mode-independent for milestone 1.
+//! terminator — which is exactly where insert mode belongs, and vim keeps the
+//! cursor on the last *character* instead. The editor applies that clamp on
+//! the normal-mode side; these motions stay mode-independent.
 
 use crate::buffer::Buffer;
 
-/// A character is part of a "word" if it is alphanumeric or `_`.
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
+/// How a character participates in a word motion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Class {
+    /// Whitespace, including the line terminator.
+    Blank,
+    /// Alphanumeric or `_`.
+    Word,
+    /// Anything else.
+    Punct,
+}
+
+fn class(c: char) -> Class {
+    // `\r` is always part of a terminator here: the line model strips
+    // terminators, and the rope splits lines on a lone CR, so a carriage
+    // return can never appear inside a line's content.
+    if c.is_whitespace() || c == '\r' {
+        Class::Blank
+    } else if c.is_alphanumeric() || c == '_' {
+        Class::Word
+    } else {
+        Class::Punct
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -80,31 +100,47 @@ impl Cursor {
         self.col = 0;
     }
 
+    /// Move to the last character of the line (vim's `$`), or column 0 on an
+    /// empty line.
     pub fn move_line_end(&mut self, buf: &Buffer) {
-        self.col = buf.line_len(self.row);
+        self.col = buf.line_len(self.row).saturating_sub(1);
     }
 
     /// Move to the start of the next word (vim's `w`).
     pub fn move_word_forward(&mut self, buf: &Buffer) {
         let len = buf.len_chars();
-        let mut idx = self.char_idx(buf);
-        if idx + 1 >= len {
-            self.set_char_idx(buf, len.saturating_sub(1));
+        if len == 0 {
             return;
         }
-        idx += 1;
-        while idx < len {
-            let prev = buf.char_at(idx - 1).expect("index in range");
-            let cur = buf.char_at(idx).expect("index in range");
-            let entering_word = is_word_char(cur) && !is_word_char(prev);
-            let leaving_space = !cur.is_whitespace() && prev.is_whitespace();
-            if entering_word || leaving_space {
-                break;
+        let mut idx = self.char_idx(buf);
+
+        // Step over the run the cursor is sitting on.
+        let current = class(buf.char_at(idx).expect("index in range"));
+        if current != Class::Blank {
+            while idx < len && class(buf.char_at(idx).expect("index in range")) == current {
+                idx += 1;
             }
-            idx += 1;
         }
-        let idx = idx.min(len - 1);
-        self.set_char_idx(buf, idx);
+
+        // Step over blanks. Crossing a newline steps onto the next line: a
+        // blank line is skipped, an empty one is a word and stops the motion.
+        while idx < len {
+            let c = buf.char_at(idx).expect("index in range");
+            if c == '\n' {
+                idx += 1;
+                if buf.char_at(idx) == Some('\n') {
+                    break;
+                }
+                continue;
+            }
+            if class(c) == Class::Blank {
+                idx += 1;
+                continue;
+            }
+            break;
+        }
+
+        self.set_char_idx(buf, idx.min(len - 1));
     }
 
     /// Move to the start of the current or previous word (vim's `b`).
@@ -114,16 +150,32 @@ impl Cursor {
             return;
         }
         idx -= 1;
+
+        // Step back over blanks; an empty line is a word, so stop on it.
         while idx > 0 {
-            let prev = buf.char_at(idx - 1).expect("index in range");
-            let cur = buf.char_at(idx).expect("index in range");
-            let entering_word = is_word_char(cur) && !is_word_char(prev);
-            let leaving_space = !cur.is_whitespace() && prev.is_whitespace();
-            if entering_word || leaving_space {
-                break;
+            let c = buf.char_at(idx).expect("index in range");
+            if c == '\n' {
+                if buf.char_at(idx - 1) == Some('\n') {
+                    break;
+                }
+                idx -= 1;
+                continue;
             }
-            idx -= 1;
+            if class(c) == Class::Blank {
+                idx -= 1;
+                continue;
+            }
+            break;
         }
+
+        // Walk back to the start of the run we landed on.
+        let current = class(buf.char_at(idx).expect("index in range"));
+        if current != Class::Blank {
+            while idx > 0 && class(buf.char_at(idx - 1).expect("index in range")) == current {
+                idx -= 1;
+            }
+        }
+
         self.set_char_idx(buf, idx);
     }
 
@@ -197,7 +249,10 @@ mod tests {
         let b = buf("héllo\n");
         let mut c = Cursor::new(0, 3);
         c.move_line_end(&b);
-        assert_eq!(c.col, 5, "columns are characters, not bytes");
+        assert_eq!(
+            c.col, 4,
+            "columns are characters, not bytes, and `$` sits on the last one"
+        );
         c.move_line_start(&b);
         assert_eq!(c.col, 0);
     }
@@ -249,5 +304,71 @@ mod tests {
         assert_eq!(c.char_idx(&b), 5);
         c.set_char_idx(&b, 1);
         assert_eq!(c, Cursor::new(0, 1));
+    }
+
+    #[test]
+    fn word_motion_forward_treats_an_empty_line_as_a_word() {
+        let b = buf("a\n\nb\n");
+        let mut c = Cursor::new(0, 0);
+        c.move_word_forward(&b);
+        assert_eq!(c, Cursor::new(1, 0), "an empty line counts as a word");
+        c.move_word_forward(&b);
+        assert_eq!(c, Cursor::new(2, 0));
+    }
+
+    #[test]
+    fn word_motion_forward_crosses_a_crlf_line_break() {
+        let b = buf("one\r\ntwo\r\n");
+        let mut c = Cursor::new(0, 0);
+        c.move_word_forward(&b);
+        assert_eq!(c, Cursor::new(1, 0), "the carriage return is not a word");
+        c.move_word_backward(&b);
+        assert_eq!(c, Cursor::new(0, 0));
+    }
+
+    #[test]
+    fn word_motion_forward_skips_blank_lines_that_are_not_empty() {
+        let b = buf("a\n   \nb\n");
+        let mut c = Cursor::new(0, 0);
+        c.move_word_forward(&b);
+        assert_eq!(c, Cursor::new(2, 0), "a blank line is not a word");
+    }
+
+    #[test]
+    fn word_motion_forward_stops_at_the_start_of_a_punctuation_run() {
+        let b = buf("foo(bar)\n");
+        let mut c = Cursor::new(0, 0);
+        c.move_word_forward(&b);
+        assert_eq!(c.col, 3);
+        c.move_word_forward(&b);
+        assert_eq!(c.col, 4);
+    }
+
+    #[test]
+    fn word_motion_backward_treats_an_empty_line_as_a_word() {
+        let b = buf("a\n\nb\n");
+        let mut c = Cursor::new(2, 0);
+        c.move_word_backward(&b);
+        assert_eq!(c, Cursor::new(1, 0));
+        c.move_word_backward(&b);
+        assert_eq!(c, Cursor::new(0, 0));
+    }
+
+    #[test]
+    fn line_end_lands_on_the_last_character() {
+        let b = buf("hello\n");
+        let mut c = Cursor::new(0, 0);
+        c.move_line_end(&b);
+        assert_eq!(c.col, 4, "vim's `$` sits on the last character");
+        c.move_line_end(&b);
+        assert_eq!(c.col, 4);
+    }
+
+    #[test]
+    fn line_end_on_an_empty_line_stays_at_column_zero() {
+        let b = buf("\n");
+        let mut c = Cursor::new(0, 0);
+        c.move_line_end(&b);
+        assert_eq!(c.col, 0);
     }
 }

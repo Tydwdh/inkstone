@@ -27,7 +27,7 @@ use crate::cursor::Cursor;
 use crate::keymap::{encode_key, Binding, Keymap, Lookup};
 use crate::lua::LuaHost;
 use crate::mode::Mode;
-use crate::render::{compose, status_line, Composed, View};
+use crate::render::{compose, gutter_width, status_line, Composed, View};
 use crate::screen::{scroll_to_cursor, Viewport};
 use crate::CoreError;
 
@@ -192,6 +192,7 @@ impl Editor {
     /// The buffer changed: re-clamp the cursor, scroll and schedule a redraw.
     pub fn after_edit(&mut self) {
         self.cursor.clamp(&self.buffer);
+        self.clamp_normal_cursor();
         self.reposition();
         self.redraw = true;
     }
@@ -202,7 +203,25 @@ impl Editor {
     }
 
     fn reposition(&mut self) {
-        scroll_to_cursor(&mut self.viewport, self.cursor, &self.buffer);
+        let gutter = gutter_width(self.buffer.line_count(), self.options.borrow().number);
+        scroll_to_cursor(&mut self.viewport, self.cursor, &self.buffer, gutter);
+    }
+
+    /// Keep the cursor off the line terminator.
+    ///
+    /// Insert mode belongs *between* characters, so `col` may sit one past the
+    /// last one. Normal mode does not: vim puts the cursor on the last
+    /// character, which is also what makes `x`, `$` and `l` behave.
+    fn clamp_normal_cursor(&mut self) {
+        if self.mode != Mode::Normal {
+            return;
+        }
+        let line_len = self.buffer.line_len(self.cursor.row);
+        self.cursor.col = if line_len == 0 {
+            0
+        } else {
+            self.cursor.col.min(line_len - 1)
+        };
     }
 
     /// Run a named command, then drain anything Lua queued while running it.
@@ -242,6 +261,7 @@ impl Editor {
     // -- mode handlers ------------------------------------------------------
 
     fn handle_normal(&mut self, key: KeyMsg) {
+        self.clamp_normal_cursor();
         let encoded = encode_key(&key);
         let sequence = if self.pending.is_empty() {
             encoded.clone()
@@ -268,6 +288,8 @@ impl Editor {
                 }
             }
         }
+        // Motions and edits may have left the cursor on the terminator.
+        self.clamp_normal_cursor();
     }
 
     fn lookup_normal(&self, sequence: &str) -> Lookup {
@@ -307,6 +329,9 @@ impl Editor {
             KeyCode::Enter => self.insert_text("\n"),
             KeyCode::Tab => self.insert_text("\t"),
             KeyCode::Backspace => self.delete_backward(),
+            // Delete is the forward twin of backspace; it runs the same
+            // command normal mode's `x` does.
+            KeyCode::Delete => self.run_command("delete_char", &[]),
             KeyCode::Char(c) => self.insert_text(&c.to_string()),
             _ => {}
         }
@@ -325,7 +350,14 @@ impl Editor {
         if idx == 0 {
             return;
         }
-        let start = self.buffer.prev_grapheme_boundary(idx);
+        // At the start of a line, backspace joins it with the line above, and
+        // the join takes the whole terminator with it -- otherwise a CRLF file
+        // would keep a stray carriage return in the middle of the joined line.
+        let start = if self.cursor.col == 0 && self.cursor.row > 0 {
+            idx - self.buffer.line_terminator_len(self.cursor.row - 1).max(1)
+        } else {
+            self.buffer.prev_grapheme_boundary(idx)
+        };
         self.buffer.remove(start, idx);
         self.cursor.set_char_idx(&self.buffer, start);
         self.after_edit();
@@ -371,6 +403,7 @@ impl Editor {
             "wq" | "x" => "save_quit",
             "q!" => "quit_force",
             "e" => "edit_file",
+            "e!" => "edit_file_force",
             other => {
                 self.message = format!("E492: Not a command: {other}");
                 return;
@@ -462,7 +495,7 @@ mod tests {
         feed(&mut ed, "l");
         assert_eq!(ed.cursor, Cursor::new(0, 5));
         feed(&mut ed, "$");
-        assert_eq!(ed.cursor.col, 7);
+        assert_eq!(ed.cursor.col, 6, "`$` lands on the last character");
         feed(&mut ed, "0");
         assert_eq!(ed.cursor.col, 0);
         feed(&mut ed, "j");
@@ -482,7 +515,7 @@ mod tests {
         feed(&mut ed, "<Home>");
         assert_eq!(ed.cursor, Cursor::new(1, 0));
         feed(&mut ed, "<End>");
-        assert_eq!(ed.cursor, Cursor::new(1, 2));
+        assert_eq!(ed.cursor, Cursor::new(1, 1), "`<End>` is vim's `$`");
     }
 
     #[test]
@@ -505,12 +538,15 @@ mod tests {
     }
 
     #[test]
-    fn delete_char_at_the_line_end_joins_lines() {
+    fn a_normal_mode_cursor_on_the_line_end_snaps_back_to_the_last_character() {
         let mut ed = Editor::for_tests();
         ed.buffer = Buffer::from_text("ab\ncd\n");
+        // Even if something parks the cursor on the terminator...
         ed.cursor = Cursor::new(0, 2);
         feed(&mut ed, "x");
-        assert_eq!(ed.buffer.text(), "abcd\n");
+        // ...the next normal-mode key first brings it back onto `b`.
+        assert_eq!(ed.buffer.text(), "a\ncd\n");
+        assert_eq!(ed.cursor, Cursor::new(0, 0));
     }
 
     #[test]
@@ -524,7 +560,7 @@ mod tests {
         assert_eq!(ed.cursor, Cursor::new(1, 0));
         // Leaving insert mode steps back onto the line above, as in vim.
         feed(&mut ed, "<Esc>");
-        assert_eq!(ed.cursor, Cursor::new(0, 3));
+        assert_eq!(ed.cursor, Cursor::new(0, 2));
         feed(&mut ed, "O");
         assert_eq!(ed.buffer.text(), "\none\n\ntwo\n");
         assert_eq!(ed.cursor, Cursor::new(0, 0));
@@ -648,5 +684,302 @@ mod tests {
         let out = ed.compose();
         assert!(out.cursor_visible);
         assert_eq!(out.cursor, (4, 0));
+    }
+
+    #[test]
+    fn normal_mode_never_leaves_the_cursor_past_the_last_character() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("abc\n");
+        feed(&mut ed, "$");
+        assert_eq!(ed.cursor, Cursor::new(0, 2));
+        feed(&mut ed, "l");
+        assert_eq!(
+            ed.cursor,
+            Cursor::new(0, 2),
+            "`l` cannot step onto the newline"
+        );
+        feed(&mut ed, "x");
+        assert_eq!(
+            ed.buffer.text(),
+            "ab\n",
+            "`x` deletes the character under the cursor"
+        );
+    }
+
+    #[test]
+    fn an_empty_line_pins_the_normal_cursor_to_column_zero() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("ab\n\ncd\n");
+        ed.cursor = Cursor::new(1, 0);
+        feed(&mut ed, "x");
+        assert_eq!(
+            ed.buffer.text(),
+            "ab\ncd\n",
+            "`x` on an empty line joins it downward"
+        );
+        assert_eq!(
+            ed.cursor,
+            Cursor::new(1, 0),
+            "and the cursor stays on that line"
+        );
+    }
+
+    #[test]
+    fn insert_mode_may_sit_one_past_the_last_character() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("abc\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "A");
+        assert_eq!(ed.cursor, Cursor::new(0, 3));
+        feed(&mut ed, "X<Esc>");
+        assert_eq!(ed.buffer.text(), "abcX\n");
+    }
+
+    #[test]
+    fn leaving_insert_mode_steps_back_onto_a_real_character() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("abc\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "A<Esc>");
+        assert_eq!(ed.cursor, Cursor::new(0, 2));
+        assert_eq!(ed.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn backspace_at_the_start_of_a_crlf_line_takes_the_whole_terminator() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("foo\r\nbar\r\n");
+        ed.cursor = Cursor::new(1, 0);
+        feed(&mut ed, "i<BS><Esc>");
+        assert_eq!(ed.buffer.text(), "foobar\r\n", "no stray carriage return");
+    }
+
+    #[test]
+    fn the_delete_key_deletes_forward_in_insert_mode() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("abc\n");
+        ed.cursor = Cursor::new(0, 1);
+        feed(&mut ed, "i<Del><Esc>");
+        assert_eq!(ed.buffer.text(), "ac\n");
+    }
+
+    #[test]
+    fn a_failed_save_quit_does_not_quit() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("x\n");
+        let dir = std::env::temp_dir().join("edit-editor-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let impossible = dir.join("no-such-dir").join("deep.txt");
+
+        ed.execute_cmdline(&format!("wq {}", impossible.display()));
+        assert!(!ed.should_quit, "the session must survive a failed write");
+        assert!(ed.message.contains("i/o error"), "{}", ed.message);
+    }
+
+    #[test]
+    fn append_at_the_end_of_a_crlf_line_inserts_before_the_carriage_return() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("foo\r\nbar\r\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "AX<Esc>");
+        assert_eq!(ed.buffer.text(), "fooX\r\nbar\r\n");
+    }
+
+    #[test]
+    fn deleting_a_crlf_line_takes_the_carriage_return_with_it() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("foo\r\nbar\r\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "dd");
+        assert_eq!(ed.buffer.text(), "bar\r\n");
+    }
+
+    #[test]
+    fn opening_a_line_below_a_crlf_line_keeps_the_line_endings_intact() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("foo\r\nbar\r\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "o<Esc>");
+        assert_eq!(ed.buffer.text(), "foo\r\n\r\nbar\r\n");
+    }
+
+    #[test]
+    fn horizontal_scroll_accounts_for_the_line_number_gutter() {
+        let mut ed = Editor::for_tests();
+        ed.options.borrow_mut().number = true;
+        ed.handle_resize(20, 4);
+        ed.buffer = Buffer::from_text(&"0123456789".repeat(10));
+        ed.cursor = Cursor::new(0, 99);
+        ed.cursor_settled();
+
+        let out = ed.compose();
+        assert!(out.cursor_visible);
+        assert_eq!(out.cursor, (19, 0), "the cursor is in the last column");
+        assert_eq!(
+            out.grid.get(19, 0).text,
+            "9",
+            "the last column shows the character under the cursor"
+        );
+        assert_eq!(
+            out.grid.get(2, 0).text,
+            "2",
+            "2 gutter columns, then col 82"
+        );
+    }
+
+    #[test]
+    fn horizontal_scroll_without_a_gutter_uses_the_whole_width() {
+        let mut ed = Editor::for_tests();
+        ed.handle_resize(20, 4);
+        ed.buffer = Buffer::from_text(&"0123456789".repeat(10));
+        ed.cursor = Cursor::new(0, 99);
+        ed.cursor_settled();
+
+        let out = ed.compose();
+        assert_eq!(out.cursor, (19, 0));
+        assert_eq!(out.grid.get(19, 0).text, "9");
+    }
+
+    #[test]
+    fn a_zero_sized_terminal_does_not_corrupt_the_viewport() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text(&"line\n".repeat(10));
+        ed.cursor = Cursor::new(5, 0);
+        ed.handle_resize(0, 0);
+        assert_eq!(ed.viewport.top_line, 5, "no meaningless scroll offset");
+        assert_eq!(ed.viewport.left_col, 0);
+        assert!(!ed.compose().cursor_visible, "nothing is visible");
+
+        ed.handle_resize(80, 10);
+        let out = ed.compose();
+        assert!(out.cursor_visible);
+        assert_eq!(out.cursor, (0, 3), "the cursor is back on screen");
+    }
+
+    #[test]
+    fn a_zero_width_terminal_still_tracks_the_cursor_column() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text(&"wide line\n".repeat(10));
+        ed.cursor = Cursor::new(5, 2);
+        ed.handle_resize(0, 10);
+        assert_eq!(
+            ed.viewport.top_line, 0,
+            "the cursor line is already on screen"
+        );
+        assert_eq!(ed.viewport.left_col, 2, "no room to scroll into, so pin it");
+    }
+
+    #[test]
+    fn edit_refuses_to_discard_unsaved_changes() {
+        let dir = std::env::temp_dir().join("edit-editor-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("reload.txt");
+        std::fs::write(&path, "on disk\n").unwrap();
+
+        let mut ed = Editor::for_tests();
+        ed.load_file(&path).unwrap();
+        feed(&mut ed, "ix<Esc>");
+        assert!(ed.buffer.is_dirty());
+
+        ed.execute_cmdline(&format!("e {}", path.display()));
+        assert!(ed.message.starts_with("E37"), "{}", ed.message);
+        assert_eq!(ed.buffer.text(), "xon disk\n", "the edits are still here");
+
+        ed.execute_cmdline(&format!("e! {}", path.display()));
+        assert_eq!(ed.buffer.text(), "on disk\n", "`e!` reloads from disk");
+        assert!(!ed.buffer.is_dirty());
+    }
+
+    #[test]
+    fn edit_on_a_clean_buffer_reloads() {
+        let dir = std::env::temp_dir().join("edit-editor-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clean.txt");
+        std::fs::write(&path, "one\n").unwrap();
+
+        let mut ed = Editor::for_tests();
+        ed.load_file(&path).unwrap();
+        std::fs::write(&path, "two\n").unwrap();
+        ed.execute_cmdline(&format!("e {}", path.display()));
+        assert_eq!(ed.buffer.text(), "two\n");
+    }
+
+    /// Deterministic pseudo-random key sequence: nothing may panic, and the
+    /// buffer/viewport invariants must hold after every single key.
+    #[test]
+    fn random_key_sequences_keep_the_editor_consistent() {
+        use edit_rpc::{KeyCode, KeyMsg};
+
+        let alphabet: Vec<KeyMsg> = "iIaAoOxddwbgG:"
+            .chars()
+            .map(|c| KeyMsg::new(KeyCode::Char(c)))
+            .chain([
+                KeyMsg::new(KeyCode::Esc),
+                KeyMsg::new(KeyCode::Enter),
+                KeyMsg::new(KeyCode::Backspace),
+                KeyMsg::new(KeyCode::Tab),
+                KeyMsg::new(KeyCode::Left),
+                KeyMsg::new(KeyCode::Right),
+                KeyMsg::new(KeyCode::Up),
+                KeyMsg::new(KeyCode::Down),
+                KeyMsg::new(KeyCode::Home),
+                KeyMsg::new(KeyCode::End),
+                KeyMsg::new(KeyCode::Delete),
+                KeyMsg::ctrl('w'),
+            ])
+            .collect();
+
+        let mut ed = Editor::for_tests();
+        ed.handle_resize(24, 6);
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+
+        for step in 0..4000 {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let r = seed as usize;
+
+            if r % 19 == 0 {
+                ed.handle_resize((r % 40) as u16, (r % 14) as u16);
+            }
+            let key = alphabet[r % alphabet.len()].clone();
+            ed.handle_key(key);
+            ed.should_quit = false; // `:q!` must not end the run
+
+            let text = ed.buffer.text();
+            assert!(
+                text.ends_with('\n'),
+                "step {step}: buffer lost its final newline"
+            );
+            assert!(ed.buffer.line_count() >= 1, "step {step}");
+            assert!(
+                ed.cursor.row < ed.buffer.line_count(),
+                "step {step}: row {} of {}",
+                ed.cursor.row,
+                ed.buffer.line_count()
+            );
+            assert!(
+                ed.cursor.col <= ed.buffer.line_len(ed.cursor.row),
+                "step {step}: col {} past line length {}",
+                ed.cursor.col,
+                ed.buffer.line_len(ed.cursor.row)
+            );
+            if ed.mode == Mode::Normal {
+                let len = ed.buffer.line_len(ed.cursor.row);
+                assert!(
+                    ed.cursor.col < len.max(1),
+                    "step {step}: normal mode cursor sits past the last character"
+                );
+            }
+            let composed = ed.compose();
+            assert_eq!(
+                composed.grid.cells.len(),
+                composed.grid.width as usize * composed.grid.height as usize
+            );
+            if composed.cursor_visible {
+                assert!(composed.cursor.0 < composed.grid.width.max(1));
+                assert!(composed.cursor.1 < composed.grid.height.max(1));
+            }
+        }
     }
 }

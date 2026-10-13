@@ -8,6 +8,18 @@
 //!
 //! Rope indices are *character* indices (`char`, i.e. Unicode scalar values),
 //! never bytes.
+//!
+//! # Lines
+//! A line is *content plus its terminator*, and the terminator is not part of
+//! the content: [`Buffer::line`] strips it and [`Buffer::line_terminator`]
+//! returns it. A file written with CRLF therefore behaves exactly like one
+//! written with LF — `$`, `A`, `o` and `dd` all land where a user expects —
+//! while `Buffer::text` still returns the original bytes, so saving never
+//! rewrites line endings behind the user's back.
+//!
+//! The set of terminators is the one the underlying rope recognises (LF,
+//! CRLF, CR, VT, FF, NEL, LS, PS), so the two models can never disagree about
+//! how many lines a buffer has.
 
 use std::path::{Path, PathBuf};
 
@@ -100,16 +112,8 @@ impl Buffer {
         self.path.as_deref()
     }
 
-    pub fn set_path(&mut self, path: Option<PathBuf>) {
-        self.path = path;
-    }
-
     pub fn is_dirty(&self) -> bool {
         self.dirty
-    }
-
-    pub fn mark_clean(&mut self) {
-        self.dirty = false;
     }
 
     /// The name to show in the status line.
@@ -123,10 +127,6 @@ impl Buffer {
 
     pub fn text(&self) -> String {
         self.rope.to_string()
-    }
-
-    pub fn rope(&self) -> &Rope {
-        &self.rope
     }
 
     pub fn len_chars(&self) -> usize {
@@ -143,22 +143,20 @@ impl Buffer {
         self.rope.get_char(idx)
     }
 
-    pub fn slice(&self, start: usize, end: usize) -> String {
-        let len = self.len_chars();
-        let start = start.min(len);
-        let end = end.clamp(start, len);
-        self.rope.slice(start..end).to_string()
+    /// Line `i` without its terminator. Panics if `i` is out of range.
+    pub fn line(&self, i: usize) -> RopeSlice<'_> {
+        strip_terminator(self.rope.line(i))
     }
 
-    /// Line `i` without its trailing newline. Panics if `i` is out of range.
-    pub fn line(&self, i: usize) -> RopeSlice<'_> {
-        let line = self.rope.line(i);
-        let n = line.len_chars();
-        if n > 0 && line.char(n - 1) == '\n' {
-            line.slice(..n - 1)
-        } else {
-            line
-        }
+    /// The terminator of line `i`: `"\n"`, `"\r\n"`, `"\r"`, ... or `""`.
+    pub fn line_terminator(&self, i: usize) -> String {
+        let full = self.rope.line(i);
+        full.slice(self.line(i).len_chars()..).to_string()
+    }
+
+    /// How many characters line `i`'s terminator takes.
+    pub fn line_terminator_len(&self, i: usize) -> usize {
+        self.rope.line(i).len_chars() - self.line_len(i)
     }
 
     pub fn line_string(&self, i: usize) -> String {
@@ -245,6 +243,25 @@ impl Buffer {
         if len == 0 || self.rope.char(len - 1) != '\n' {
             self.rope.insert_char(len, '\n');
         }
+    }
+}
+
+/// Remove one terminator from the end of a rope line.
+///
+/// Mirrors the rope's own idea of a line break, so a line never ends up with
+/// half a terminator attached to its content.
+fn strip_terminator(line: RopeSlice<'_>) -> RopeSlice<'_> {
+    let n = line.len_chars();
+    if n == 0 {
+        return line;
+    }
+    match line.char(n - 1) {
+        // A CRLF pair is a single terminator.
+        '\n' if n >= 2 && line.char(n - 2) == '\r' => line.slice(..n - 2),
+        '\n' | '\r' | '\u{000B}' | '\u{000C}' | '\u{0085}' | '\u{2028}' | '\u{2029}' => {
+            line.slice(..n - 1)
+        }
+        _ => line,
     }
 }
 
@@ -417,5 +434,48 @@ mod tests {
             buf.is_dirty(),
             "a failed save must not clear the dirty flag"
         );
+    }
+
+    #[test]
+    fn crlf_line_endings_stay_out_of_the_line_model() {
+        let buf = Buffer::from_text("a\r\nbb\r\n");
+        // The bytes are preserved exactly...
+        assert_eq!(buf.text(), "a\r\nbb\r\n");
+        // ...but the carriage return is part of the terminator, not of the line.
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.line_string(0), "a");
+        assert_eq!(buf.line_len(0), 1);
+        assert_eq!(buf.line_string(1), "bb");
+        assert_eq!(buf.line_len(1), 2);
+        assert_eq!(buf.line_terminator(0), "\r\n");
+        assert_eq!(buf.line_terminator_len(0), 2);
+
+        // A position on the carriage return reports as the line end.
+        assert_eq!(buf.char_to_line_col(1), (0, 1));
+        assert_eq!(buf.char_to_line_col(4), (1, 1));
+        assert_eq!(buf.char_to_line_col(6), (1, 2));
+        // The end of a line is the start of its terminator.
+        assert_eq!(buf.line_col_to_char(0, 1), 1);
+        assert_eq!(buf.line_col_to_char(1, 2), 5);
+    }
+
+    #[test]
+    fn a_lone_carriage_return_counts_as_a_line_break() {
+        // Whatever the rope calls a break, the line model calls a break too.
+        let buf = Buffer::from_text("a\rb\n");
+        assert_eq!(buf.line_count(), 2);
+        assert_eq!(buf.line_string(0), "a");
+        assert_eq!(buf.line_terminator(0), "\r");
+        assert_eq!(buf.line_string(1), "b");
+    }
+
+    #[test]
+    fn editing_never_rewrites_the_bytes_on_disk() {
+        let mut buf = Buffer::from_text("a\r\nb\r\n");
+        buf.insert(buf.line_col_to_char(0, 1), "X");
+        assert_eq!(buf.text(), "aX\r\nb\r\n");
+        let (start, end) = (0, buf.line_len(0) + buf.line_terminator_len(0));
+        buf.remove(start, end);
+        assert_eq!(buf.text(), "b\r\n");
     }
 }

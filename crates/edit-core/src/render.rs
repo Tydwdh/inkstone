@@ -58,13 +58,17 @@ pub struct Composed {
 pub fn compose(view: &View<'_>) -> Composed {
     let vp = view.viewport;
     let mut grid = Grid::new(vp.width, vp.height);
-    let gutter = if view.number {
-        (digits(view.buffer.line_count()) + 1) as u16
-    } else {
-        0
+    let gutter = gutter_width(view.buffer.line_count(), view.number);
+    let layout = TextLayout {
+        gutter,
+        left_col: vp.left_col,
+        width: vp.width.saturating_sub(gutter) as usize,
+        tabstop: view.tabstop,
     };
-    let content_width = vp.width.saturating_sub(gutter) as usize;
 
+    // The cursor position comes out of the same walk that draws the line, so
+    // it can never disagree with where the character actually landed.
+    let mut cursor_at = None;
     for row in 0..vp.text_rows() {
         let line_no = vp.top_line + row as usize;
         if line_no >= view.buffer.line_count() {
@@ -74,15 +78,15 @@ pub fn compose(view: &View<'_>) -> Composed {
             draw_line_number(&mut grid, row, gutter, line_no + 1);
         }
         let line = view.buffer.line_string(line_no);
-        draw_line(
-            &mut grid,
-            row,
-            gutter,
-            &line,
-            vp.left_col,
-            content_width,
-            view.tabstop,
-        );
+        let cursor_char = if view.cursor.row == line_no && view.cursor.col >= vp.left_col {
+            Some(view.cursor.col)
+        } else {
+            None
+        };
+        let x = draw_line(&mut grid, row, &line, &layout, cursor_char);
+        if let (Some(x), Some(_)) = (x, cursor_char) {
+            cursor_at = Some((x, row));
+        }
     }
 
     if vp.height >= 2 {
@@ -107,7 +111,7 @@ pub fn compose(view: &View<'_>) -> Composed {
         draw_text(&mut grid, 0, bottom_row, &text, vp.width as usize, 0);
     }
 
-    let (cursor, cursor_visible) = cursor_position(view, gutter);
+    let (cursor, cursor_visible) = cursor_position(view, cursor_at);
     Composed {
         grid,
         cursor,
@@ -115,28 +119,32 @@ pub fn compose(view: &View<'_>) -> Composed {
     }
 }
 
-fn cursor_position(view: &View<'_>, gutter: u16) -> ((u16, u16), bool) {
+/// Place the cursor, given the screen column the line walk reported for it.
+fn cursor_position(view: &View<'_>, found: Option<(u16, u16)>) -> ((u16, u16), bool) {
     let vp = view.viewport;
-    let rows = vp.text_rows() as usize;
-    let cur = view.cursor;
-    if vp.width == 0 || rows == 0 || cur.row < vp.top_line || cur.row - vp.top_line >= rows {
+    if vp.width == 0 || vp.text_rows() == 0 {
         return ((0, 0), false);
     }
-    if cur.col < vp.left_col {
-        return ((0, 0), false);
-    }
-    let y = (cur.row - vp.top_line) as u16;
-    let offset = cur.col - vp.left_col;
-    let x = gutter.saturating_add(u16::try_from(offset).unwrap_or(u16::MAX));
-    if x < vp.width {
-        ((x, y), true)
-    } else {
-        ((vp.width - 1, y), true)
+    match found {
+        Some((x, y)) => ((x.min(vp.width - 1), y), true),
+        None => ((0, 0), false),
     }
 }
 
 fn digits(n: usize) -> usize {
     n.max(1).to_string().len()
+}
+
+/// How many screen columns the line-number gutter takes.
+///
+/// The single source of truth: both the renderer and the scroll maths use it,
+/// so the cursor cannot end up in a column the gutter has taken.
+pub fn gutter_width(line_count: usize, number: bool) -> u16 {
+    if number {
+        (digits(line_count) + 1) as u16
+    } else {
+        0
+    }
 }
 
 fn draw_line_number(grid: &mut Grid, row: u16, gutter: u16, number: usize) {
@@ -153,27 +161,48 @@ fn draw_line_number(grid: &mut Grid, row: u16, gutter: u16, number: usize) {
     }
 }
 
+/// How the text area is laid out: everything `draw_line` needs to know that is
+/// the same for every row.
+struct TextLayout {
+    /// Screen columns reserved for line numbers.
+    gutter: u16,
+    /// First visible character of each line.
+    left_col: usize,
+    /// Screen columns available for text.
+    width: usize,
+    /// Columns a tab advances to.
+    tabstop: usize,
+}
+
 /// Draw one buffer line, honouring the horizontal scroll offset and tab stops.
+///
+/// When `cursor_char` is set, this returns the screen column that character
+/// starts at — the whole point being that the cursor is placed by the same walk
+/// that draws, so tabs and double-width graphemes cannot push it off the
+/// character it is supposed to be sitting on.
 fn draw_line(
     grid: &mut Grid,
     row: u16,
-    gutter: u16,
     line: &str,
-    left_col: usize,
-    content_width: usize,
-    tabstop: usize,
-) {
-    let left = gutter as usize;
-    let right = left + content_width;
-    let tabstop = tabstop.max(1);
+    layout: &TextLayout,
+    cursor_char: Option<usize>,
+) -> Option<u16> {
+    let left = layout.gutter as usize;
+    let right = left + layout.width;
+    let left_col = layout.left_col;
+    let tabstop = layout.tabstop.max(1);
     let mut x = left;
     let mut char_idx = 0usize;
+    let mut found = None;
 
     for grapheme in line.graphemes(true) {
         let grapheme_chars = grapheme.chars().count();
         if char_idx < left_col {
             char_idx += grapheme_chars;
             continue;
+        }
+        if Some(char_idx) == cursor_char {
+            found = Some(x as u16);
         }
         if x >= right {
             break;
@@ -201,6 +230,13 @@ fn draw_line(
             x += width;
         }
         char_idx += grapheme_chars;
+    }
+
+    // The cursor past the end of the line (insert mode) or beyond the
+    // truncation point belongs at the end of the drawn text.
+    match (&found, cursor_char) {
+        (None, Some(_)) => Some(x.min(u16::MAX as usize) as u16),
+        _ => found,
     }
 }
 
@@ -319,6 +355,42 @@ mod tests {
         }
         // The text row above is not reversed.
         assert_eq!(out.grid.get(0, 0).attrs & ATTR_REVERSE, 0);
+    }
+
+    #[test]
+    fn the_cursor_follows_display_columns_not_character_counts() {
+        // A tab pushes `b` to screen column 4, even though it is character 2.
+        let mut c = Case::new("a\tb\n", 20, 4);
+        c.tabstop = 4;
+        c.cursor = Cursor::new(0, 2);
+        assert_eq!(c.compose().cursor, (4, 0));
+        c.cursor = Cursor::new(0, 1);
+        assert_eq!(
+            c.compose().cursor,
+            (1, 0),
+            "the tab itself starts at column 1"
+        );
+
+        // A double-width grapheme takes two columns, so the insertion point
+        // after it is column 2, not 1.
+        let mut wide = Case::new("你好\n", 20, 4);
+        wide.cursor = Cursor::new(0, 1);
+        assert_eq!(wide.compose().cursor, (2, 0));
+        wide.cursor = Cursor::new(0, 2);
+        assert_eq!(wide.compose().cursor, (4, 0), "past the end of the line");
+    }
+
+    #[test]
+    fn the_cursor_is_clamped_to_the_edge_when_the_text_is_truncated() {
+        let mut c = Case::new("abcdefghij\n", 5, 3);
+        c.cursor = Cursor::new(0, 9);
+        let out = c.compose();
+        assert!(out.cursor_visible);
+        assert_eq!(
+            out.cursor,
+            (4, 0),
+            "the cursor sits on the last visible column"
+        );
     }
 
     #[test]

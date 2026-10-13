@@ -76,6 +76,7 @@ impl Keymap {
             ("o", &["open_line_below"]),
             ("O", &["open_line_above"]),
             ("x", &["delete_char"]),
+            ("<Del>", &["delete_char"]),
             ("dd", &["delete_line"]),
             (":", &["enter_command"]),
             ("<Esc>", &["escape"]),

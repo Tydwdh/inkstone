@@ -1,0 +1,94 @@
+//! Declarative macros that turn a declaration into both the type and the
+//! lists derived from it.
+//!
+//! The point of these is that a hand-maintained list can silently fall out of
+//! step with the type it describes. Here the list *is* the type: the same
+//! declaration generates the enum, the "every variant" constant and the
+//! spelling table, so there is nothing left to keep in sync.
+
+/// Declare the protocol's key set.
+///
+/// Generates `KeyCode`, `KeyCode::ALL` and `KeyCode::spellings`. The invoking
+/// crate needs `serde` in scope, because the enum derives its traits.
+///
+/// The declaration has two sections: `data` for the keys that carry a value,
+/// with a representative used by `ALL` and no spellings (the notation layer
+/// spells those itself — a character key is written as the character), then
+/// `keys` for plain keys, each with every spelling that names it, canonical
+/// first.
+///
+/// ```text
+/// edit_rpc::key_codes! {
+///     data {
+///         Char(char) => 'a',
+///     }
+///     keys {
+///         /// Enter / Return.
+///         Enter => "CR" | "Return",
+///         /// Escape.
+///         Esc => "Esc",
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! key_codes {
+    (
+        data { $( $payload_variant:ident ( $payload:ty ) => $representative:expr, )* }
+        keys { $( $(#[$meta:meta])* $variant:ident => $notation:literal $( | $alias:literal )* , )* }
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        pub enum KeyCode {
+            $( $payload_variant($payload), )*
+            $(
+                $(#[$meta])*
+                $variant,
+            )*
+        }
+
+        impl KeyCode {
+            /// Every key the protocol can express.
+            ///
+            /// Generated from the declaration, so it cannot fall behind it.
+            pub const ALL: &'static [KeyCode] = &[
+                $( KeyCode::$payload_variant($representative), )*
+                $( KeyCode::$variant, )*
+            ];
+
+            /// The spellings that name this key, canonical first.
+            ///
+            /// `None` for keys that spell themselves.
+            pub fn spellings(self) -> Option<&'static [&'static str]> {
+                match self {
+                    $( KeyCode::$payload_variant(_) => None, )*
+                    $( KeyCode::$variant => Some(&[$notation $(, $alias)*]), )*
+                }
+            }
+        }
+    };
+}
+
+/// Declare the protocol's cell attribute bits.
+///
+/// Generates the constants and `ATTRS` together, so a bit cannot exist without
+/// appearing in the list a frontend iterates.
+///
+/// ```text
+/// edit_rpc::cell_attributes! {
+///     /// Bold text.
+///     ATTR_BOLD = 0,
+///     ATTR_REVERSE = 1,
+/// }
+/// ```
+#[macro_export]
+macro_rules! cell_attributes {
+    ( $( $(#[$meta:meta])* $constant:ident = $bit:expr ),* $(,)? ) => {
+        $(
+            $(#[$meta])*
+            pub const $constant: u16 = 1 << $bit;
+        )*
+
+        /// Every attribute bit, so a frontend can prove it translates all of
+        /// them. Generated from the declaration above.
+        pub const ATTRS: &[u16] = &[ $( $constant ),* ];
+    };
+}

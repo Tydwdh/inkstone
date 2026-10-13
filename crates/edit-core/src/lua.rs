@@ -32,9 +32,9 @@ use mlua::{Function, Lua, Table, Value};
 use edit_rpc::Param;
 
 use crate::command::CommandRegistry;
-use crate::editor::{Options, Setting};
 use crate::keymap::Keymap;
 use crate::mode::Mode;
+use crate::settings::{Options, Setting};
 use crate::CoreError;
 
 /// Commands the Lua layer has registered, by name.
@@ -381,7 +381,24 @@ ed.set("tabstop", 8)
         let err = host
             .load_str("test", r#"ed.set("tabstop", "four")"#)
             .unwrap_err();
-        assert!(err.to_string().contains("tabstop does not accept"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("tabstop must be a positive integer"),
+            "{err}"
+        );
+
+        let err = host
+            .load_str("test", r#"ed.set("tabstop", 0)"#)
+            .unwrap_err();
+        assert!(err.to_string().contains("positive integer"), "{err}");
+
+        let err = host
+            .load_str("test", r#"ed.set("number", "yes")"#)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("number must be true or false"),
+            "{err}"
+        );
     }
 
     #[test]

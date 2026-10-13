@@ -18,19 +18,19 @@ use std::io::{self, Read, Write};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+mod macros;
+
 /// Hard cap on a single frame, guarding against corrupt/hostile length prefixes.
 pub const MAX_FRAME_LEN: u32 = 64 * 1024 * 1024;
 
-/// Cell attribute bit flags.
-pub const ATTR_BOLD: u16 = 1 << 0;
-pub const ATTR_UNDERLINE: u16 = 1 << 1;
-pub const ATTR_REVERSE: u16 = 1 << 2;
-
-/// Every attribute bit, so a frontend can prove it translates all of them.
-///
-/// Like [`KeyCode::ALL`], this is hand-maintained: adding a bit without adding
-/// it here leaves a frontend silently dropping the new style.
-pub const ATTRS: [u16; 3] = [ATTR_BOLD, ATTR_UNDERLINE, ATTR_REVERSE];
+cell_attributes! {
+    /// Bold text.
+    ATTR_BOLD = 0,
+    /// Underlined text.
+    ATTR_UNDERLINE = 1,
+    /// Foreground and background swapped.
+    ATTR_REVERSE = 2,
+}
 
 /// Errors produced while encoding, decoding, or framing a message.
 #[derive(Debug, thiserror::Error)]
@@ -51,48 +51,38 @@ pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 // Input events
 // ---------------------------------------------------------------------------
 
-/// A key, decoupled from any particular terminal library.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum KeyCode {
-    Char(char),
-    Enter,
-    Esc,
-    Backspace,
-    Tab,
-    Left,
-    Right,
-    Up,
-    Down,
-    Home,
-    End,
-    Delete,
-    PageUp,
-    PageDown,
-}
-
-impl KeyCode {
-    /// Every key the protocol can express.
-    ///
-    /// Nothing enforces this list at compile time, so it is the one thing a new
-    /// `KeyCode` variant has to be added to by hand — and the tests that iterate
-    /// it (key notation round-tripping in `edit-core`, terminal mapping in the
-    /// frontend) then fail until the new key is handled everywhere.
-    pub const ALL: [KeyCode; 14] = [
-        KeyCode::Char('a'),
-        KeyCode::Enter,
-        KeyCode::Esc,
-        KeyCode::Backspace,
-        KeyCode::Tab,
-        KeyCode::Left,
-        KeyCode::Right,
-        KeyCode::Up,
-        KeyCode::Down,
-        KeyCode::Home,
-        KeyCode::End,
-        KeyCode::Delete,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-    ];
+key_codes! {
+    data {
+        Char(char) => 'a',
+    }
+    keys {
+        /// Enter / Return.
+        Enter => "CR" | "Enter" | "Return",
+        /// Escape.
+        Esc => "Esc" | "Escape",
+        /// Backspace.
+        Backspace => "BS" | "Backspace",
+        /// Tab.
+        Tab => "Tab",
+        /// The left arrow.
+        Left => "Left",
+        /// The right arrow.
+        Right => "Right",
+        /// The up arrow.
+        Up => "Up",
+        /// The down arrow.
+        Down => "Down",
+        /// Home.
+        Home => "Home",
+        /// End.
+        End => "End",
+        /// Delete forward.
+        Delete => "Del" | "Delete",
+        /// Page up.
+        PageUp => "PageUp",
+        /// Page down.
+        PageDown => "PageDown",
+    }
 }
 
 /// A modifier held while a key was pressed.

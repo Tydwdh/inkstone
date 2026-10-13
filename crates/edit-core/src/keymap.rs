@@ -249,52 +249,51 @@ fn parse_token(token: &str) -> Result<KeyMsg, KeyParseError> {
 }
 
 fn decode_name(name: &str) -> Result<KeyCode, KeyParseError> {
+    // The spellings a character uses inside angle notation, because a bare
+    // character cannot express them.
+    match name {
+        "Space" => return Ok(KeyCode::Char(' ')),
+        "lt" | "LT" => return Ok(KeyCode::Char('<')),
+        "gt" | "GT" => return Ok(KeyCode::Char('>')),
+        _ => {}
+    }
+
     let mut chars = name.chars();
     if let (Some(c), None) = (chars.next(), chars.next()) {
         return Ok(KeyCode::Char(c));
     }
-    Ok(match name {
-        "Esc" | "Escape" => KeyCode::Esc,
-        "CR" | "Enter" | "Return" => KeyCode::Enter,
-        "BS" | "Backspace" => KeyCode::Backspace,
-        "Tab" => KeyCode::Tab,
-        "Space" => KeyCode::Char(' '),
-        "lt" | "LT" => KeyCode::Char('<'),
-        "gt" | "GT" => KeyCode::Char('>'),
-        "Left" => KeyCode::Left,
-        "Right" => KeyCode::Right,
-        "Up" => KeyCode::Up,
-        "Down" => KeyCode::Down,
-        "Home" => KeyCode::Home,
-        "End" => KeyCode::End,
-        "Del" | "Delete" => KeyCode::Delete,
-        "PageUp" => KeyCode::PageUp,
-        "PageDown" => KeyCode::PageDown,
-        _ => return Err(KeyParseError(format!("unknown key name {name:?}"))),
-    })
+
+    // Everything else comes from the table the protocol generates, so a new key
+    // is nameable the moment it is declared.
+    KeyCode::ALL
+        .iter()
+        .copied()
+        .find(|code| code.spellings().is_some_and(|names| names.contains(&name)))
+        .ok_or_else(|| KeyParseError(format!("unknown key name {name:?}")))
+}
+
+/// The notation for a key without modifiers.
+///
+/// A character is written as itself; every other key is written in angle
+/// brackets, which is what makes `<C-Esc>` unambiguous.
+fn bare_notation(code: KeyCode) -> String {
+    match code {
+        KeyCode::Char(c) => match c {
+            ' ' => "<Space>".to_string(),
+            '<' => "<lt>".to_string(),
+            '>' => "<gt>".to_string(),
+            other => other.to_string(),
+        },
+        other => match other.spellings().and_then(|names| names.first()) {
+            Some(name) => format!("<{name}>"),
+            None => unreachable!("{other:?} has no spelling: teach the notation layer about it"),
+        },
+    }
 }
 
 /// The canonical notation for one key.
 pub fn encode_key(key: &KeyMsg) -> String {
-    let name = match key.code {
-        KeyCode::Char(' ') => "<Space>".to_string(),
-        KeyCode::Char('<') => "<lt>".to_string(),
-        KeyCode::Char('>') => "<gt>".to_string(),
-        KeyCode::Char(c) => c.to_string(),
-        KeyCode::Enter => "<CR>".to_string(),
-        KeyCode::Esc => "<Esc>".to_string(),
-        KeyCode::Backspace => "<BS>".to_string(),
-        KeyCode::Tab => "<Tab>".to_string(),
-        KeyCode::Left => "<Left>".to_string(),
-        KeyCode::Right => "<Right>".to_string(),
-        KeyCode::Up => "<Up>".to_string(),
-        KeyCode::Down => "<Down>".to_string(),
-        KeyCode::Home => "<Home>".to_string(),
-        KeyCode::End => "<End>".to_string(),
-        KeyCode::Delete => "<Del>".to_string(),
-        KeyCode::PageUp => "<PageUp>".to_string(),
-        KeyCode::PageDown => "<PageDown>".to_string(),
-    };
+    let name = bare_notation(key.code);
     if key.mods.is_empty() {
         return name;
     }
@@ -410,7 +409,7 @@ mod tests {
     fn every_protocol_key_has_a_notation() {
         // Iterating `KeyCode::ALL` rather than a hand-written list is what makes
         // a new protocol key impossible to add without teaching the notation.
-        for code in edit_rpc::KeyCode::ALL {
+        for code in edit_rpc::KeyCode::ALL.iter().copied() {
             let key = KeyMsg::new(code);
             let encoded = encode_key(&key);
             let decoded = parse_key(&encoded).unwrap_or_else(|e| {

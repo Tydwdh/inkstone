@@ -459,7 +459,7 @@ mod tests {
     /// without deciding how a terminal produces it.
     #[test]
     fn every_protocol_key_has_a_terminal_mapping() {
-        for code in KeyCode::ALL {
+        for &code in KeyCode::ALL {
             let terminal_code = match code {
                 KeyCode::Char(c) => event::KeyCode::Char(c),
                 KeyCode::Enter => event::KeyCode::Enter,
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn every_attribute_bit_reaches_the_terminal() {
         let mut rendered = Vec::new();
-        for bit in edit_rpc::ATTRS {
+        for &bit in edit_rpc::ATTRS {
             let mut out = Vec::new();
             queue_attributes(&mut out, bit).unwrap();
             assert!(!out.is_empty(), "attribute bit {bit} is not translated");

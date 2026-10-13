@@ -134,22 +134,22 @@ key that runs a `:` command does not erase what it just reported.
 
 ## What a change costs
 
-Rust cannot enumerate an enum's variants, so anything that has to be *listed*
-is listed by hand and paired with a test that iterates the list. `Setting` does
-not need such a list for its setters — the `match`es in `Options::set`/`get`
-and `Setting::name` are exhaustive, so forgetting one is a build error. For
-`KeyCode::ALL` and `ATTRS` the list *is* the source of truth, and what no test
-can catch is a variant that never gets added to it; that is why the list lives
-next to the type with a comment saying so, and why the tests that iterate it
-exist.
+The recurring shapes — keys, cell attributes, settings, commands — are declared
+once, in a macro, and everything else is generated from that declaration:
+`key_codes!` (`edit-rpc`) emits the enum, `ALL` and the spelling table;
+`cell_attributes!` emits the constants and `ATTRS`; `settings!` and `commands!`
+(`edit-core`) emit the setting enum, the options struct, its defaults and the
+`set`/`get` pair, and the command registry. There is no second list to keep in
+step, which is what makes a forgotten case a build error instead of a runtime
+surprise.
 
 | change | files touched | what catches a miss |
 | --- | --- | --- |
-| new command | `command.rs`, optionally `keymap.rs` + `README.md` | the README keymap test |
+| new command | write the handler in `command.rs`, add its name to the `commands!` list, optionally a default key + a README row | a name with no function is a build error; the README test |
 | new motion | `cursor.rs` (pure) + one thin command | compiler |
-| new setting | `editor.rs` (`Options` field, `Setting` variant, default) | exhaustive `set`/`get`/`name` matches |
-| new key | `edit-rpc` (`KeyCode` + `KeyCode::ALL`), `keymap.rs` (notation), `edit/main.rs` (terminal) | two tests iterate `KeyCode::ALL` |
-| new cell attribute | `edit-rpc` (bit + `ATTRS`), `render.rs`, `edit/main.rs` | the frontend attribute test |
+| new setting | one line in the `settings!` table (plus a `SettingValue` impl for a new type) | nothing else to touch; the generated test round-trips it |
+| new key | one line in the `key_codes!` table | the frontend's mapping test fails to compile until it is mapped |
+| new cell attribute | one line in `cell_attributes!`, then `render.rs` and `edit/main.rs` | the frontend attribute test |
 | new message | `edit-rpc`, `edit-server` (`Session::handle`), `edit` (frontend match) | exhaustive matches |
 | new mode (e.g. visual) | `mode.rs`, `editor.rs` (dispatch), `command.rs`, `keymap.rs`, `lua.rs` (name), `render.rs` (display) | exhaustive matches on `Mode` |
 | new frontend | nothing existing | — (that is the point of the split) |
@@ -168,14 +168,19 @@ compiler-enforced.
 - **A new motion**: implement the movement on `Cursor` (pure, buffer in,
   position out), then a command that calls it and ends with `after_edit()`,
   which re-clamps the cursor, scrolls it into view and marks the screen dirty.
-- **A new setting**: add the field to `Options` with a default, add a
-  `Setting` variant, and add it to `Setting::ALL`. The `set`/`get`/`name`
-  matches are exhaustive, so a forgotten case stops the build.
-- **A new key**: add the `KeyCode` variant *and* add it to `KeyCode::ALL`;
-  tests in `edit-core` (notation) and `edit` (terminal mapping) then fail until
-  both sides know it.
-- **A new cell attribute**: add the bit *and* add it to `ATTRS`; the frontend
-  test fails until it translates the bit.
+- **A new setting**: add one line to the `settings!` table in `settings.rs`.
+  The enum, the struct, the default, the name lookup and `set`/`get` all follow
+  from it. A new *type* of value needs a `SettingValue` impl saying how it maps
+  to and from `Param`.
+- **A new key**: add one line to the `key_codes!` table in `edit-rpc`. The
+  notation layer needs nothing; the frontend is forced to map it, because the
+  test that iterates `KeyCode::ALL` matches over the enum exhaustively.
+- **A new cell attribute**: add one line to `cell_attributes!`, then teach
+  `render.rs` to emit it and the frontend to translate it — the attribute test
+  fails until both do.
+- **A new command**: write `fn name(editor: &mut Editor, params: &[Param])` in
+  `command.rs` and add `name` to the `commands!` list. The name is not repeated
+  anywhere, so it cannot be registered under the wrong one.
 - **A new message**: add it to `ClientMsg`/`ServerMsg`, handle it in
   `Session::handle`. Frontends are free to ignore anything they do not know.
 - **A new frontend**: implement the framing, blit `Grid`, forward terminal keys

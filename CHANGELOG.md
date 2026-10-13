@@ -11,6 +11,14 @@
   rejected at load with an explanation.
 
 ### Changed
+- The recurring lists — protocol keys, cell attributes, settings and built-in
+  commands — are declared once and generate the code around them, so there is
+  no second list to keep in step. Concretely: a new key is one line in
+  `edit-rpc` (the notation layer needs nothing, and the frontend fails to
+  compile until it maps the key); a new setting is one line in
+  `settings.rs`; a new command is a handler plus its name, with no name string
+  to get wrong. Command handlers are now named exactly like the commands they
+  implement.
 - Option access goes through a `Setting` enum instead of option name strings,
   so the editor, the script layer and the renderer cannot disagree about which
   options exist, and a forgotten case is a build error rather than a runtime

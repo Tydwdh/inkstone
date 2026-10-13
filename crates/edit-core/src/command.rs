@@ -48,39 +48,36 @@ impl CommandRegistry {
         }
     }
 
-    /// The registry with every built-in command installed.
-    pub fn with_builtins() -> Self {
-        let mut registry = Self::new();
-        registry.register("noop", cmd_noop);
-        registry.register("move_left", cmd_move_left);
-        registry.register("move_right", cmd_move_right);
-        registry.register("move_up", cmd_move_up);
-        registry.register("move_down", cmd_move_down);
-        registry.register("move_word_forward", cmd_move_word_forward);
-        registry.register("move_word_backward", cmd_move_word_backward);
-        registry.register("move_line_start", cmd_move_line_start);
-        registry.register("move_line_end", cmd_move_line_end);
-        registry.register("goto_first_line", cmd_goto_first_line);
-        registry.register("goto_last_line", cmd_goto_last_line);
-        registry.register("page_up", cmd_page_up);
-        registry.register("page_down", cmd_page_down);
-        registry.register("enter_insert", cmd_enter_insert);
-        registry.register("enter_insert_before", cmd_enter_insert_before);
-        registry.register("append", cmd_append);
-        registry.register("append_eol", cmd_append_eol);
-        registry.register("open_line_below", cmd_open_line_below);
-        registry.register("open_line_above", cmd_open_line_above);
-        registry.register("delete_char", cmd_delete_char);
-        registry.register("delete_line", cmd_delete_line);
-        registry.register("enter_command", cmd_enter_command);
-        registry.register("escape", cmd_escape);
-        registry.register("save", cmd_save);
-        registry.register("quit", cmd_quit);
-        registry.register("save_quit", cmd_save_quit);
-        registry.register("quit_force", cmd_quit_force);
-        registry.register("edit_file", cmd_edit_file);
-        registry.register("edit_file_force", cmd_edit_file_force);
-        registry
+    commands! {
+        noop,
+        move_left,
+        move_right,
+        move_up,
+        move_down,
+        move_word_forward,
+        move_word_backward,
+        move_line_start,
+        move_line_end,
+        goto_first_line,
+        goto_last_line,
+        page_up,
+        page_down,
+        enter_insert,
+        enter_insert_before,
+        append,
+        append_eol,
+        open_line_below,
+        open_line_above,
+        delete_char,
+        delete_line,
+        enter_command,
+        escape,
+        save,
+        quit,
+        save_quit,
+        quit_force,
+        edit_file,
+        edit_file_force,
     }
 
     pub fn register(&mut self, name: &'static str, f: CommandFn) {
@@ -132,11 +129,11 @@ fn path_param(params: &[Param]) -> Option<&Path> {
 // Commands
 // ---------------------------------------------------------------------------
 
-fn cmd_noop(_editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn noop(_editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_left(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn move_left(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_left(&editor.buffer);
     }
@@ -144,7 +141,7 @@ fn cmd_move_left(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_right(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn move_right(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_right(&editor.buffer);
     }
@@ -152,7 +149,7 @@ fn cmd_move_right(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn move_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_up(&editor.buffer);
     }
@@ -160,7 +157,7 @@ fn cmd_move_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn move_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_down(&editor.buffer);
     }
@@ -168,7 +165,7 @@ fn cmd_move_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_word_forward(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn move_word_forward(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_word_forward(&editor.buffer);
     }
@@ -176,7 +173,7 @@ fn cmd_move_word_forward(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_word_backward(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn move_word_backward(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         editor.cursor.move_word_backward(&editor.buffer);
     }
@@ -184,25 +181,25 @@ fn cmd_move_word_backward(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_move_line_start(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn move_line_start(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.move_line_start(&editor.buffer);
     editor.after_edit();
     Ok(())
 }
 
-fn cmd_move_line_end(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn move_line_end(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.move_line_end(&editor.buffer);
     editor.after_edit();
     Ok(())
 }
 
-fn cmd_goto_first_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn goto_first_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.goto_first_line(&editor.buffer);
     editor.after_edit();
     Ok(())
 }
 
-fn cmd_goto_last_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn goto_last_line(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.goto_last_line(&editor.buffer);
     editor.after_edit();
     Ok(())
@@ -215,7 +212,7 @@ fn page_step(editor: &Editor, params: &[Param]) -> usize {
     rows.saturating_sub(1).max(1) * count(params)
 }
 
-fn cmd_page_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn page_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..page_step(editor, params) {
         editor.cursor.move_down(&editor.buffer);
     }
@@ -223,7 +220,7 @@ fn cmd_page_down(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_page_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn page_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..page_step(editor, params) {
         editor.cursor.move_up(&editor.buffer);
     }
@@ -231,19 +228,19 @@ fn cmd_page_up(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_enter_insert(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn enter_insert(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.mode = Mode::Insert;
     Ok(())
 }
 
-fn cmd_enter_insert_before(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn enter_insert_before(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.col = 0;
     editor.mode = Mode::Insert;
     editor.after_edit();
     Ok(())
 }
 
-fn cmd_append(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn append(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let end = editor.buffer.line_len(editor.cursor.row);
     editor.cursor.col = (editor.cursor.col + 1).min(end);
     editor.mode = Mode::Insert;
@@ -251,14 +248,14 @@ fn cmd_append(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_append_eol(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn append_eol(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.cursor.col = editor.buffer.line_len(editor.cursor.row);
     editor.mode = Mode::Insert;
     editor.after_edit();
     Ok(())
 }
 
-fn cmd_open_line_below(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn open_line_below(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let row = editor.cursor.row;
     let end_of_content = editor
         .buffer
@@ -274,7 +271,7 @@ fn cmd_open_line_below(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_open_line_above(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn open_line_above(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let row = editor.cursor.row;
     let start = editor.buffer.line_col_to_char(row, 0);
     let terminator = open_line_terminator(editor, row);
@@ -297,7 +294,7 @@ fn open_line_terminator(editor: &Editor, row: usize) -> String {
     }
 }
 
-fn cmd_delete_char(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn delete_char(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         let row = editor.cursor.row;
         let line_len = editor.buffer.line_len(row);
@@ -323,7 +320,7 @@ fn cmd_delete_char(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_delete_line(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn delete_line(editor: &mut Editor, params: &[Param]) -> Result<()> {
     for _ in 0..count(params) {
         let row = editor.cursor.row.min(editor.buffer.line_count() - 1);
         let start = editor.buffer.line_col_to_char(row, 0);
@@ -336,7 +333,7 @@ fn cmd_delete_line(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_enter_command(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn enter_command(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.mode = Mode::Command;
     editor.cmdline.clear();
     editor.pending.clear();
@@ -344,7 +341,7 @@ fn cmd_enter_command(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_escape(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn escape(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     let was_insert = editor.mode == Mode::Insert;
     editor.mode = Mode::Normal;
     editor.pending.clear();
@@ -355,7 +352,7 @@ fn cmd_escape(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_save(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn save(editor: &mut Editor, params: &[Param]) -> Result<()> {
     match editor.buffer.save(path_param(params)) {
         Ok(path) => {
             editor.message = format!("\"{}\" written", path.display());
@@ -368,7 +365,7 @@ fn cmd_save(editor: &mut Editor, params: &[Param]) -> Result<()> {
     }
 }
 
-fn cmd_quit(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn quit(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     if editor.buffer.is_dirty() {
         let msg = "E37: No write since last change (add ! to override)".to_string();
         editor.message = msg.clone();
@@ -378,18 +375,18 @@ fn cmd_quit(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_quit_force(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn quit_force(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.should_quit = true;
     Ok(())
 }
 
-fn cmd_save_quit(editor: &mut Editor, params: &[Param]) -> Result<()> {
-    cmd_save(editor, params)?;
+fn save_quit(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    save(editor, params)?;
     editor.should_quit = true;
     Ok(())
 }
 
-fn cmd_edit_file(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn edit_file(editor: &mut Editor, params: &[Param]) -> Result<()> {
     if editor.buffer.is_dirty() {
         let msg = "E37: No write since last change (add ! to override)".to_string();
         editor.message = msg.clone();
@@ -399,7 +396,7 @@ fn cmd_edit_file(editor: &mut Editor, params: &[Param]) -> Result<()> {
 }
 
 /// `:e!` — reload from disk, discarding unsaved changes on purpose.
-fn cmd_edit_file_force(editor: &mut Editor, params: &[Param]) -> Result<()> {
+fn edit_file_force(editor: &mut Editor, params: &[Param]) -> Result<()> {
     reload_file(editor, params)
 }
 

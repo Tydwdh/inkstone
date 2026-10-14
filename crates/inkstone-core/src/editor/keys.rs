@@ -11,6 +11,15 @@ use super::*;
 impl Editor {
     /// Feed one key press through the mode state machine.
     pub fn handle_key(&mut self, key: KeyMsg) {
+        // `<C-c>` in a command-line window continues in Command-line mode with
+        // the line under the cursor — "works both in Insert and in Normal mode"
+        // — which is why it is handled before the mode is looked at. The window
+        // stays where it is: vim's own note is "there is no redraw, thus the
+        // window will remain visible".
+        if self.in_history_window() && key.code == KeyCode::Char('c') && key.is_ctrl() {
+            self.continue_from_history_window();
+            return;
+        }
         // A message lives until the next key *outside* command mode; the key
         // that finishes a `:` command must not erase what it just reported. A
         // `:s///c` is the other exception: its question *is* the message, and

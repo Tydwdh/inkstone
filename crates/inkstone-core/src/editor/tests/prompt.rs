@@ -251,3 +251,35 @@ fn the_history_window_can_be_edited() {
     assert_eq!(ed.buffer.text(), before, "nothing changed");
     assert!(List::Commands.is_editable() && !List::Settings.is_editable());
 }
+
+#[test]
+fn the_command_line_window_has_its_own_rules() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\n");
+    ed.viewport = crate::screen::Viewport::new(40, 12);
+    feed(&mut ed, ":set number<Enter>");
+    feed(&mut ed, "q");
+    feed(&mut ed, ":");
+    assert_eq!(ed.list, Some(List::Commands));
+
+    // No nesting: "once a command-line window is open it is not possible to open
+    // another one".
+    feed(&mut ed, "q");
+    feed(&mut ed, "/");
+    assert_eq!(ed.message, "E1292: Command-line window is already open");
+    assert_eq!(ed.windows.len(), 2, "still just the one window");
+
+    // `<C-c>` continues in Command-line mode with the line under the cursor, and
+    // the window stays visible.
+    ed.cursor = Cursor::new(0, 0);
+    feed(&mut ed, "<C-c>");
+    assert_eq!(ed.mode, Mode::Command, "typing again");
+    assert_eq!(ed.cmdline, "set number");
+    assert_eq!(ed.prompt, Prompt::Command);
+    assert_eq!(ed.list, Some(List::Commands), "the window is still there");
+
+    // `<Esc>` leaves that line alone and the window is still a window.
+    feed(&mut ed, "<Esc>");
+    assert_eq!(ed.mode, Mode::Normal);
+    assert_eq!(ed.list, Some(List::Commands));
+}

@@ -409,7 +409,9 @@ and `q/` the same for searches. It is a window like any other: the lines in it c
 edited, and `<CR>` runs the one under the cursor — a command for `q:`, a search for
 `q/`, and it works in insert mode too. The window goes away when a line is run, so
 what the command did is not half a screen down, and an edit that is not run goes with
-it. `'cmdwinheight'` says how tall the window is. A command run from a script is not
+it. `'cmdwinheight'` says how tall the window is, there is no nesting — `q:` inside one
+says `E1292: Command-line window is already open` — and `<C-c>` puts the line under
+the cursor back on the command line to keep typing, with the window still there. A command run from a script is not
 in the history: it is what a *person* typed.
 
 `gf` opens the file whose name is under the cursor — read as a *file name* rather

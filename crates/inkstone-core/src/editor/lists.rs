@@ -175,6 +175,12 @@ impl Editor {
     /// the cursor is on: a command history is a list of things to *do again*,
     /// which is what makes it a list rather than a message.
     pub(crate) fn open_history_window(&mut self, searches: bool) {
+        // "Once a command-line window is open it is not possible to open another
+        // one": there is no nesting, which vim says with `E1292`.
+        if self.history_window().is_some() {
+            self.message = "E1292: Command-line window is already open".to_string();
+            return;
+        }
         let history = if searches {
             &self.search_history
         } else {
@@ -217,6 +223,51 @@ impl Editor {
             .min(u16::MAX as usize) as u16;
         self.resize_window(Axis::Rows, Resize::Set(height - 1));
         self.message = format!("{count} command{}", if count == 1 { "" } else { "s" });
+    }
+
+    /// Which document is a command-line window, if one is up.
+    ///
+    /// The document the current window shows keeps its `list` in the *live* field
+    /// — the slots and the editor swap it, like marks and the jump list — so the
+    /// slot of the document that is up is the one that says nothing.
+    pub(crate) fn history_window(&self) -> Option<usize> {
+        let current = self.current_document();
+        self.documents
+            .iter()
+            .enumerate()
+            .position(|(index, document)| {
+                let list = if index == current {
+                    self.list
+                } else {
+                    document.list
+                };
+                list.is_some_and(List::is_editable)
+            })
+    }
+
+    /// Whether the window that is up is a command-line window, which is the one
+    /// state some commands are not allowed in.
+    pub(crate) fn in_history_window(&self) -> bool {
+        self.list.is_some_and(List::is_editable)
+    }
+
+    /// `<C-c>` in a command-line window: the line under the cursor becomes the
+    /// line being typed, and the window stays where it is.
+    pub(crate) fn continue_from_history_window(&mut self) {
+        let searches = self.list == Some(List::Searches);
+        let row = self.cursor.row;
+        let line = self.buffer.line_string(row).trim_end().to_string();
+        self.mode = Mode::Command;
+        self.prompt = if searches {
+            Prompt::SearchForward
+        } else {
+            Prompt::Command
+        };
+        self.cmdline = line;
+        self.cmdline_cursor = self.cmdline.chars().count();
+        self.forget_recall();
+        self.clear_pending();
+        self.redraw = true;
     }
 
     /// Run the line the cursor is on in a history window, and close it.

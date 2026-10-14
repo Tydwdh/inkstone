@@ -3046,6 +3046,32 @@ what vim's command-line window is *for*: edit the line before running it.
   the cursor), the `E11`/`E1188` restrictions on moving to another window from
   there, and `'cedit'` for opening the window from the command line.
 
+## Done — the command-line window's own rules
+
+The two rules the editable-window entry left behind, both of them about the state
+the window is in rather than the text in it.
+
+- **What shipped:** no nesting — `q:` or `q/` while one is open says `E1292:
+  Command-line window is already open`, which is the manual's "once a command-line
+  window is open it is not possible to open another one" — and `<C-c>`, which
+  "continues in Command-line mode" with the line under the cursor, "both in Insert
+  and in Normal mode", leaving the window where it is.
+- **Constraints it had to respect, and how:** finding "the command-line window" is
+  not a matter of looking at the documents. The `list` a document is, like marks
+  and the jump list, is *swapped* between the editor and the slot the document is
+  in — so the document that is up has its list in the live field and nothing in
+  its slot, and a lookup that read the slots found nothing while the window was
+  right there. The lookup asks the live field for the current document and the
+  slots for the rest, which is what the swap means.
+- **What the probe found:** that the rule had been written, compiled, and done
+  nothing at all — `q/` still opened a second window because the guard looked in
+  the wrong place. It took a probe test printing the documents to see it.
+- **Files:** `inkstone-core` (`history_window`, `in_history_window`,
+  `continue_from_history_window`, the guard in `open_history_window`, the `<C-c>`
+  arm in `handle_key`).
+- **Left for later:** the `E11` rule that disables every command which would move
+  to another window or edit another buffer while the window is up, and `'cedit'`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

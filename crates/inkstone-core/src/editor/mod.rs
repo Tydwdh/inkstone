@@ -105,6 +105,23 @@ impl Prompt {
     }
 }
 
+/// Which value a `:set` writes, which is the manual's table:
+///
+/// ```text
+///       :set option=value       both      both
+///  :setlocal option=value        -        set
+/// :setglobal option=value       set        -
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// `:set` — the value in force here, and the one every other file gets.
+    Both,
+    /// `:setlocal` — only the file that is open.
+    Local,
+    /// `:setglobal` — only the value outside any file.
+    Global,
+}
+
 /// A search being typed, shown as it goes — `'incsearch'`.
 ///
 /// The pattern is run for real as it is typed, so the highlight on screen is
@@ -314,6 +331,9 @@ pub struct Document {
     pub(crate) jump_from: Option<Cursor>,
     /// The places edits happened: what `g;` and `g,` walk.
     pub(crate) changes: Changes,
+    /// The settings `:setlocal` gave this file, kept with it so that showing it
+    /// again puts them back.
+    pub(crate) local_options: Vec<(crate::settings::Setting, Param)>,
 }
 
 impl Document {
@@ -353,6 +373,7 @@ impl Document {
             jumps: Jumps::default(),
             jump_from: None,
             changes: Changes::default(),
+            local_options: Vec::new(),
         }
     }
 }
@@ -1130,8 +1151,16 @@ pub struct Editor {
     /// What keys do. Shared with the Lua host, so a script can remap at any
     /// time.
     pub(crate) keymap: Rc<RefCell<Keymap>>,
-    /// Settings, shared with the Lua host for the same reason.
+    /// Settings, shared with the Lua host for the same reason. These are the ones
+    /// in force: the global value, unless the file that is open has a value of
+    /// its own for that setting.
     pub options: Rc<RefCell<Options>>,
+    /// What a setting is outside any file: the value `:setglobal` writes and a
+    /// file with no value of its own falls back to.
+    pub(crate) global_options: Options,
+    /// The settings the file that is open has a value of its own for, in the
+    /// order they were set.
+    pub(crate) local_options: Vec<(crate::settings::Setting, Param)>,
     /// Keys of a partially-typed multi-key binding (`d` waiting for `d`).
     pub pending: String,
     /// Key presses in insert mode that may be the start of a mapping.
@@ -1238,7 +1267,13 @@ impl Editor {
         let keymap = Rc::new(RefCell::new(Keymap::with_defaults()));
         let options = Rc::new(RefCell::new(Options::default()));
         let lua = LuaHost::new(&registry, Rc::clone(&keymap), Rc::clone(&options))?;
+        // The settings outside any file start as the defaults, which is what the
+        // live ones are until a `:setlocal` gives the file that is open a value
+        // of its own.
+        let global_options = (*options.borrow()).clone();
         let mut editor = Self {
+            global_options,
+            local_options: Vec::new(),
             view_dir: None,
             fold_states: Vec::new(),
             last_cursor_row: 0,

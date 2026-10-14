@@ -83,3 +83,79 @@ fn set_all_shows_every_setting_and_set_inv_turns_one_around() {
     ed.execute_cmdline("set invnope");
     assert!(ed.message.contains("E518"), "{}", ed.message);
 }
+
+#[test]
+fn a_setting_can_belong_to_one_file() {
+    let dir = std::env::temp_dir().join("inkstone-setlocal");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let one = dir.join("one.txt");
+    let two = dir.join("two.txt");
+    std::fs::write(&one, "one\n").unwrap();
+    std::fs::write(&two, "two\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    ed.open_file(&one).unwrap();
+    // `:setlocal` is this file's value and nobody else's.
+    ed.execute_cmdline("setlocal tabstop=2");
+    assert_eq!(ed.options.borrow().tabstop, 2, "in force here");
+    ed.execute_cmdline("setglobal tabstop=8");
+    assert_eq!(
+        ed.options.borrow().tabstop,
+        2,
+        ":setglobal does not change what this file asked for"
+    );
+
+    // Another file gets the global value, not this one's.
+    ed.execute_cmdline(&format!("e {}", two.display()));
+    assert_eq!(ed.options.borrow().tabstop, 8, "a file of its own");
+
+    // And coming back brings the file's own value with it.
+    ed.execute_cmdline("bp");
+    assert_eq!(ed.options.borrow().tabstop, 2, "its value came back");
+    ed.execute_cmdline("bn");
+    assert_eq!(ed.options.borrow().tabstop, 8, "and left again");
+
+    // `:set` is both, which is the manual's table: the value in force here *and*
+    // the one every other file starts from.
+    ed.execute_cmdline("bp");
+    ed.execute_cmdline("set tabstop=3");
+    assert_eq!(ed.options.borrow().tabstop, 3);
+    ed.execute_cmdline(&format!("e {}", two.display()));
+    assert_eq!(
+        ed.options.borrow().tabstop,
+        3,
+        "a `:set` reaches the files that follow"
+    );
+    ed.execute_cmdline("bp");
+    assert_eq!(ed.options.borrow().tabstop, 3, "and this one too");
+}
+
+#[test]
+fn the_three_spellings_ask_about_their_own_value() {
+    let dir = std::env::temp_dir().join("inkstone-setlocal-ask");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("ask.txt");
+    std::fs::write(&file, "x\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    ed.open_file(&file).unwrap();
+    ed.execute_cmdline("setglobal tabstop=8");
+    ed.execute_cmdline("setlocal tabstop=2");
+    ed.execute_cmdline("setlocal tabstop?");
+    assert_eq!(ed.message, "tabstop=2", "what this file says");
+    ed.execute_cmdline("setglobal tabstop?");
+    assert_eq!(ed.message, "tabstop=8", "what every other file gets");
+    ed.execute_cmdline("set tabstop?");
+    assert_eq!(ed.message, "tabstop=2", "and what is in force here");
+
+    // A file with no value of its own answers with the global one.
+    ed.execute_cmdline("setlocal autoindent");
+    assert!(
+        ed.options.borrow().autoindent,
+        "a switch this file turned on"
+    );
+    ed.execute_cmdline("setlocal number?");
+    assert_eq!(ed.message, "number=false", "there is nothing of its own");
+}

@@ -25,6 +25,14 @@
   not to the sentence both share, so both now read `E54: \zs is not supported: a
   match here is a stretch of text and cannot be cut in half`.
 
+### Added
+- `:setlocal` and `:setglobal`, the manual's own table: `:set {name}={value}`
+  writes the value in force *and* the one every other file gets, `:setlocal` only
+  the file that is open, and `:setglobal` only the value outside every file. A
+  file's own values travel with it — switching away puts what is in force back to
+  the global value, and coming back brings the file's values with it — and asking
+  follows the same three spellings.
+
 ### Changed
 - The kernel's internals were reorganized for legibility, with no change in
   behaviour. `editor.rs` (14,705 lines: one 6,157-line `impl` block and half its

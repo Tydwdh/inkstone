@@ -518,10 +518,19 @@ impl Editor {
         {
             return;
         }
-        // `:set` has spellings of its own — `nonumber`, `number?`, `all`,
-        // `inv{name}` — so it is handled before the table of names.
-        if cmd == "set" {
-            self.ex_set(arg);
+        // `:set` and its two scoped spellings have spellings of their own —
+        // `nonumber`, `number?`, `all`, `inv{name}` — so they are handled before
+        // the table of names. The scope is the difference between them: the
+        // manual's table says `:set` writes both values, `:setlocal` only the
+        // file's own and `:setglobal` only the one outside every file.
+        let scope = match cmd {
+            "set" => Some(Scope::Both),
+            "setlocal" | "setl" => Some(Scope::Local),
+            "setglobal" | "setg" => Some(Scope::Global),
+            _ => None,
+        };
+        if let Some(scope) = scope {
+            self.ex_set(arg, scope);
             return;
         }
 
@@ -790,9 +799,10 @@ impl Editor {
         true
     }
 
-    /// `:set` and its three spellings: a switch on, a switch off, and a
-    /// question about any setting. `:set all` opens the settings window.
-    fn ex_set(&mut self, arg: &str) {
+    /// `:set`, `:setlocal` and `:setglobal`: a switch on, a switch off, and a
+    /// question about any setting, in whichever scope the command asks for.
+    /// `:set all` opens the settings window.
+    fn ex_set(&mut self, arg: &str, scope: Scope) {
         let (name, value) = match arg.split_once('=') {
             Some((name, value)) => (name.trim().to_string(), value.trim().to_string()),
             None => (arg.trim().to_string(), String::new()),
@@ -818,7 +828,7 @@ impl Editor {
                                 return;
                             }
                         };
-                        match self.set_option(setting, &flipped) {
+                        match self.set_option(setting, &flipped, scope) {
                             Ok(()) => self.message = format!("{rest}={flipped}"),
                             Err(error) => {
                                 self.message = format!("E474: {rest} {error}");
@@ -853,9 +863,17 @@ impl Editor {
         match crate::settings::Setting::from_name(&name) {
             None => self.message = format!("E518: Unknown option: {name}"),
             Some(setting) if value.is_empty() => {
-                self.message = format!("{name}={}", self.option_text(setting));
+                // What is asked about depends on the spelling: `:setlocal?` is
+                // this file's value, `:setglobal?` the one outside every file,
+                // and `:set?` the value in force here.
+                let text = match scope {
+                    Scope::Local => self.local_option_text(setting),
+                    Scope::Global => self.global_option_text(setting),
+                    Scope::Both => self.option_text(setting),
+                };
+                self.message = format!("{name}={text}");
             }
-            Some(setting) => match self.set_option(setting, &value) {
+            Some(setting) => match self.set_option(setting, &value, scope) {
                 Ok(()) => {
                     self.message = format!("{name}={value}");
                     // With `'foldmethod'` set to `indent` the folds are a

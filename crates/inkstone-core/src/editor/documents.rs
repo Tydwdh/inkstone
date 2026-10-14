@@ -39,6 +39,9 @@ impl Editor {
     /// swapped in one go, and the slot ends up holding the placeholders.
     pub(super) fn save_document(&mut self) {
         let index = self.current_document();
+        // The values of the file that is leaving go back to the global ones
+        // first: that borrows the editor, and the slot below borrows it too.
+        self.reset_local_options();
         let slot = &mut self.documents[index];
         // The cursor on screen is where this document was last looked at.
         slot.cursor = self.cursor;
@@ -55,6 +58,10 @@ impl Editor {
         std::mem::swap(&mut slot.list_targets, &mut self.list_targets);
         std::mem::swap(&mut slot.last_visual, &mut self.last_visual);
         std::mem::swap(&mut slot.insert_again_at, &mut self.insert_again_at);
+        // The settings `:setlocal` gave this file travel with it, and the ones
+        // in force go back to the global value: what is left behind is a file
+        // that has no say in what the next one looks like.
+        slot.local_options = std::mem::take(&mut self.local_options);
     }
 
     /// The other half of [`Editor::save_document`]: bring the document of the
@@ -78,6 +85,9 @@ impl Editor {
         // Where the document was last looked at. A window that is being
         // switched to puts its own cursor back on top of this one.
         self.cursor = slot.cursor;
+        // And what `:setlocal` said about it, which is in force from now on.
+        self.local_options = std::mem::take(&mut slot.local_options);
+        self.apply_local_options();
     }
 
     /// Forget the document that is on screen, leaving a placeholder in the live

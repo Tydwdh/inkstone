@@ -2736,6 +2736,38 @@ not a setting.
 - **Left for later:** `'hlsearch'` as a *window*-local setting, `'smartcase'`,
   and `:match`-style one-off highlights.
 
+## Done — `:setlocal` and `:setglobal`
+
+A setting can belong to one file, which is the last thing the settings layer
+needed to be usable on a real project.
+
+- **What shipped:** the manual's table, exactly — `:set {name}={value}` writes
+  the value in force *and* the one every other file gets, `:setlocal` only the
+  file that is open, `:setglobal` only the value outside every file — and the
+  three query spellings that go with it. A file's own values travel with it:
+  switching away puts the settings it named back to the global values, and
+  coming back applies them again.
+- **Constraints it had to respect, and how:** the kernel has *one* live `Options`
+  — the `Rc<RefCell<…>>` the Lua host also holds, and what every reader reads —
+  so a "local value" is not a second table to look in but a value *in* that one,
+  with a list beside it saying which settings the file has a say in. The list
+  travels in `Document` (the same place marks and the jump list travel), and the
+  two ends are `save_document`/`load_document`: reset the settings the file
+  named to the global values, hand the list over, and apply the arriving file's
+  list. `:setglobal` is the one case that has to look: a file with a value of its
+  own keeps it, because "the value every *other* file gets" says so.
+- **What the smoke test showed:** the three answers on the message row —
+  `tabstop=2` in the file, `tabstop=8` in another, `tabstop=2` again on the way
+  back — which is the whole feature in three lines of terminal.
+- **Files:** `inkstone-core` (`Scope`, `global_options`, `local_options` on the
+  editor and on `Document`, `set_option`'s scope, `reset_local_options`,
+  `apply_local_options`, `local_option_text`/`global_option_text`, the three
+  spellings in the `:` dispatcher).
+- **Left for later:** `:setlocal` with no argument (vim shows every local value
+  that differs from the default), the `--` prefix vim prints when a global value
+  is what a local question answers, and `ed.set` from a script writing the global
+  value rather than only the one in force.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

@@ -516,6 +516,20 @@ Options are set the way vim spells them: `:set number` turns a switch on,
 switch (`:set textwidth`) asks too, since a number has no "on". `:set {name}={value}`
 sets any of them from the `:` line, and the same names are what `ed.set` writes.
 
+A value can belong to one file, which is what `:setlocal` is for — vim's table,
+exactly:
+
+| command | value in force here | value every other file gets |
+|---|---|---|
+| `:set {name}={value}` | set | set |
+| `:setlocal {name}={value}` | set | — |
+| `:setglobal {name}={value}` | — | set |
+
+So `:setlocal tabstop=2` in one file leaves every other file at the global
+value, and coming back to that file brings its `2` with it. Asking follows the
+same three spellings: `:setlocal tabstop?` is this file's value, `:setglobal
+tabstop?` the one outside every file, and `:set tabstop?` the one in force.
+
 Saving can ask the server to lay the file out first: `formatonsave` (off by default)
 makes `:w` write the file and then ask for `textDocument/formatting`, applying what
 comes back and writing *that* — so the file on disk is what the server laid out and

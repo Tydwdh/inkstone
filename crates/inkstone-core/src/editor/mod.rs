@@ -1209,6 +1209,10 @@ pub struct Editor {
     pub search: Search,
     /// The search being typed, when `'incsearch'` is showing one.
     incsearch: Option<IncSearch>,
+    /// Whether the highlighting of matches has been turned off by
+    /// `:nohlsearch`, which is not the same as `'hlsearch'` being off: it is
+    /// forgotten as soon as a search is used again.
+    nohlsearch: bool,
     /// What a language server said about the document on screen.
     pub diagnostics: Vec<Diagnostic>,
     /// The syntax colours, and the per-line state they need: what a line starts
@@ -1311,6 +1315,7 @@ impl Editor {
             clipboard: None,
             search: Search::new(),
             incsearch: None,
+            nohlsearch: false,
             highlighter: LineStates::new(Language::Plain),
             diagnostics: Vec::new(),
             should_quit: false,

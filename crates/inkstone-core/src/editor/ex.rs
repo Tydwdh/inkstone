@@ -70,6 +70,7 @@ fn command_name(cmd: &str) -> Option<&'static str> {
         "resize" | "res" => "resize",
         "vresize" => "resize_vertical",
         "tabsplit" => "tab_split",
+        "nohlsearch" | "noh" => "nohlsearch",
         "&" => "substitute_again",
         "&&" => "substitute_again_flags",
         _ => return None,
@@ -695,6 +696,10 @@ impl Editor {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = range.unwrap_or((self.cursor.row.min(last), self.cursor.row.min(last)));
         let count = to.saturating_sub(from) + 1;
+        // Whatever the keys have to say is left standing: `:normal n` past the
+        // last match says `E486` rather than covering it with a count — the same
+        // rule `:g` follows for the command it runs on each line.
+        self.message.clear();
         for row in from..=to {
             if row > self.buffer.line_count().saturating_sub(1) {
                 break;
@@ -708,10 +713,12 @@ impl Editor {
                 self.run_command("escape", &[]);
             }
         }
-        self.message = format!(
-            "{count} line{} normalised",
-            if count == 1 { "" } else { "s" }
-        );
+        if self.message.is_empty() {
+            self.message = format!(
+                "{count} line{} normalised",
+                if count == 1 { "" } else { "s" }
+            );
+        }
         true
     }
 

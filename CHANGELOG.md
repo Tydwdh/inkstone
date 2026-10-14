@@ -38,6 +38,17 @@
   `#[cfg(test)]`.
 
 ### Added
+- `'hlsearch'` (on, where vim defaults to off) and `:nohlsearch`, which is not
+  the same thing: the command stops drawing the matches without forgetting the
+  pattern, and any search brings the underlining back, while the setting stays
+  where it is put. A search being typed still shows the match it found, whatever
+  either says — that is what `'incsearch'` is for.
+- `'wrapscan'` (on, the way vim has it): `:set nowrapscan` makes a search that
+  runs off the end of the file say `E486: Pattern not found` and leave the
+  cursor where it was, instead of coming round again.
+- `:normal` now leaves what its keys had to say standing, the way `:g` does for
+  the command it runs on each line: `:normal /zzz<Enter>` says `E486` rather
+  than covering it with a count of lines normalised.
 - Double, triple and quadruple clicks select what the manual says they do: a word
   under the pointer (or, on a bracket, everything up to its pair), a line, and a
   rectangular block. A drag after a double click takes whole words until the

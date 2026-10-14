@@ -773,3 +773,81 @@ fn a_substitute_refreshes_the_search() {
         "the text it was looking for is gone"
     );
 }
+
+#[test]
+fn no_hlsearch_stops_drawing_the_matches_until_a_search_is_used() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one two\nthree two\n");
+    feed(&mut ed, "/two<Enter>");
+    assert_eq!(ed.view().matches.len(), 2, "both are highlighted");
+    assert!(
+        ed.view().current_match.is_some(),
+        "and this one is stronger"
+    );
+
+    // `:nohlsearch` is about the display, not the setting: the pattern stays,
+    // and the next search brings the highlighting back.
+    feed(&mut ed, ":nohlsearch<Enter>");
+    assert!(ed.view().matches.is_empty(), "nothing is drawn");
+    assert!(ed.view().current_match.is_none());
+    assert!(!ed.search.is_empty(), "but the search is still up");
+    feed(&mut ed, "n");
+    assert_eq!(ed.view().matches.len(), 2, "using a search brings it back");
+    // The setting was never touched, so `:set hlsearch?` still says on.
+    feed(&mut ed, ":set hlsearch?<Enter>");
+    assert_eq!(ed.message, "hlsearch=true");
+
+    // `:set nohlsearch` is the setting itself, and stays off.
+    feed(&mut ed, ":set nohlsearch<Enter>");
+    assert!(ed.view().matches.is_empty());
+    feed(&mut ed, "n");
+    assert!(ed.view().matches.is_empty(), "and `n` does not light them");
+    feed(&mut ed, ":set hlsearch<Enter>");
+    assert_eq!(ed.view().matches.len(), 2, "until it is set again");
+}
+
+#[test]
+fn no_wrapscan_reports_that_there_is_nothing_past_the_last_match() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one two\n");
+    feed(&mut ed, "/two<Enter>");
+    assert_eq!(ed.cursor, Cursor::new(0, 4));
+
+    // With the default `'wrapscan'`, `n` comes round again.
+    feed(&mut ed, "n");
+    assert_eq!(ed.cursor, Cursor::new(0, 4), "the same match, wrapped");
+    assert_eq!(ed.message, "");
+
+    feed(&mut ed, ":set nowrapscan<Enter>");
+    feed(&mut ed, "n");
+    assert_eq!(
+        ed.message, "E486: Pattern not found: two",
+        "there is nothing after the last match, and now it says so"
+    );
+    assert_eq!(ed.cursor, Cursor::new(0, 4), "and it stays where it was");
+    feed(&mut ed, "N");
+    assert_eq!(ed.message, "E486: Pattern not found: two", "either way");
+
+    // A fresh search obeys it too.
+    ed.cursor = Cursor::new(0, 0);
+    feed(&mut ed, "/one<Enter>");
+    assert_eq!(ed.cursor, Cursor::new(0, 0), "found where it is");
+    feed(&mut ed, "n");
+    assert_eq!(ed.message, "E486: Pattern not found: one");
+}
+
+#[test]
+fn normal_leaves_what_its_keys_had_to_say_standing() {
+    // `:normal` runs keys as if typed, so a key that fails says why: a count of
+    // lines normalised would cover the one thing the person needs to read.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one two\n");
+    // The keys a `:normal` runs start at the beginning of the line, so the
+    // failing command in this test is a search with nothing to find.
+    feed(&mut ed, ":normal /zzz<Enter><Enter>");
+    assert_eq!(ed.message, "E486: Pattern not found: zzz");
+
+    // With nothing to say, the count is what shows.
+    feed(&mut ed, ":normal x<Enter>");
+    assert_eq!(ed.message, "1 line normalised");
+}

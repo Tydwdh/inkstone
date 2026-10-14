@@ -2704,6 +2704,38 @@ Not a feature: the code was reorganized so that it can keep growing, following
   as *"done"*: `ex_delete_range` first claimed every `:d`, which silently broke
   `:g/TODO/d` until two tests caught it.
 
+## Done — `'hlsearch'`, `:nohlsearch` and `'wrapscan'`
+
+The two search settings the incsearch entry left behind, and the command that is
+not a setting.
+
+- **What shipped:** `'hlsearch'` (on here; vim defaults it off, and this editor
+  has always underlined matches, so the setting starts on and the README says
+  why), `:nohlsearch` — which stops drawing the matches *without* forgetting the
+  pattern, so any search brings the underlining back — and `'wrapscan'`, whose
+  `:set nowrapscan` makes a search that runs off the end of the file say
+  `E486: Pattern not found` and leave the cursor alone.
+- **Constraints it had to respect, and how:** three states decide one drawing —
+  the setting, the command's flag, and whether a search is being typed — and
+  they are not the same question. The rule that came out is `lighting =
+  'hlsearch' && !:nohlsearch` for the matches, `lighting || previewing` for the
+  match under the cursor, and `previewing` is never gated: `'incsearch'` shows
+  what is being typed whatever either of the other two says. That is one place in
+  the view, not three in the renderer.
+  `'wrapscan'` is a parameter of the lookup (`Search::next_from(from, direction,
+  wrap)`) rather than a second search function: the difference is one `or_else`
+  that is skipped, and everything that searches — `/`, `?`, `n`, `N`, the preview
+  and `<C-g>` — passes the setting through the same call.
+- **What the smoke test found:** `:normal n` covered the `E486` its own key had
+  produced with "1 line normalised", so a person running `:normal` would never
+  see why nothing moved. `:normal` now leaves a message standing, which is the
+  rule `:g` already followed for the command it runs on each line.
+- **Files:** `inkstone-core` (`settings.rs`, `search.rs`'s `next_from`, the
+  `nohlsearch` command and its table entry, `search_is_highlighted` /
+  `search_highlight_on` / `search_highlight_off`, `view.rs`).
+- **Left for later:** `'hlsearch'` as a *window*-local setting, `'smartcase'`,
+  and `:match`-style one-off highlights.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

@@ -156,8 +156,15 @@ impl Search {
     /// `direction`, wrapping round the end of the document the way vim does.
     ///
     /// `from` is a character index; a match that starts exactly at it is skipped
-    /// for a forward search, so `n` moves on rather than standing still.
-    pub(crate) fn next_from(&self, from: usize, direction: Direction) -> Option<(usize, usize)> {
+    /// for a forward search, so `n` moves on rather than standing still. `wrap`
+    /// is `'wrapscan'`: without it, a search that runs off the end of the
+    /// document finds nothing rather than coming round again.
+    pub fn next_from(
+        &self,
+        from: usize,
+        direction: Direction,
+        wrap: bool,
+    ) -> Option<(usize, usize)> {
         if self.matches.is_empty() {
             return None;
         }
@@ -166,14 +173,14 @@ impl Search {
                 .matches
                 .iter()
                 .find(|(start, _)| *start > from)
-                .or_else(|| self.matches.first())
+                .or_else(|| wrap.then(|| self.matches.first()).flatten())
                 .copied(),
             Direction::Backward => self
                 .matches
                 .iter()
                 .rev()
                 .find(|(start, _)| *start < from)
-                .or_else(|| self.matches.last())
+                .or_else(|| wrap.then(|| self.matches.last()).flatten())
                 .copied(),
         }
     }
@@ -291,18 +298,33 @@ mod tests {
                 false,
             )
             .expect("compiles");
-        assert_eq!(search.next_from(0, Direction::Forward), Some((4, 7)));
-        assert_eq!(search.next_from(4, Direction::Forward), Some((12, 15)));
+        assert_eq!(search.next_from(0, Direction::Forward, true), Some((4, 7)));
         assert_eq!(
-            search.next_from(12, Direction::Forward),
+            search.next_from(4, Direction::Forward, true),
+            Some((12, 15))
+        );
+        assert_eq!(
+            search.next_from(12, Direction::Forward, true),
             Some((4, 7)),
             "past the last match it starts again"
         );
-        assert_eq!(search.next_from(12, Direction::Backward), Some((4, 7)));
         assert_eq!(
-            search.next_from(0, Direction::Backward),
+            search.next_from(12, Direction::Backward, true),
+            Some((4, 7))
+        );
+        assert_eq!(
+            search.next_from(0, Direction::Backward, true),
             Some((12, 15)),
             "before the first it wraps to the last"
+        );
+        // `'nowrapscan'`: running off the end finds nothing rather than coming
+        // round again.
+        assert_eq!(search.next_from(12, Direction::Forward, false), None);
+        assert_eq!(search.next_from(0, Direction::Backward, false), None);
+        assert_eq!(
+            search.next_from(0, Direction::Forward, false),
+            Some((4, 7)),
+            "and a match that is there is still found"
         );
     }
 
@@ -332,7 +354,7 @@ mod tests {
         );
         assert!(search.is_empty());
         assert!(search.matches().is_empty());
-        assert_eq!(search.next_from(0, Direction::Forward), None);
+        assert_eq!(search.next_from(0, Direction::Forward, true), None);
     }
 
     #[test]

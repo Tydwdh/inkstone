@@ -325,7 +325,15 @@ Keys that are not bindings, because they are what the mode is for:
 
 `/pattern` searches forwards, `?pattern` backwards, `n` and `N` move between
 matches and every match on screen is underlined (the one the cursor is on is
-bold as well). An empty pattern repeats the last search.
+bold as well). An empty pattern repeats the last search. `:nohlsearch` stops
+drawing the matches without forgetting the pattern — the next search brings the
+underlining back — while `:set nohlsearch` is the setting itself and stays off.
+Vim defaults that setting to off; this editor has always underlined matches, so
+it starts on.
+
+`'wrapscan'` is on, the way vim has it: a search that runs off the end of the
+file comes round again. `:set nowrapscan` is what makes `n` past the last match
+say `E486: Pattern not found` instead of silently starting over.
 
 `'incsearch'` is on: the cursor goes to the match as the pattern is typed, and
 the cursor is drawn there rather than on the line being typed, so a search is
@@ -665,7 +673,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `incsearch`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` (an integer), `foldnestmax` (an integer) and `foldignore` (characters) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` (an integer), `foldnestmax` (an integer) and `foldignore` (characters) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

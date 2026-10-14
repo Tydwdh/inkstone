@@ -158,6 +158,9 @@ impl Editor {
     /// doing nothing quietly.
     pub(crate) fn run_search(&mut self, pattern: &str, direction: Direction) {
         let ignore_case = self.options.borrow().ignorecase;
+        // Using a search brings the highlighting back: `:nohlsearch` is about
+        // the display, not about the pattern.
+        self.search_highlight_on();
         if pattern.is_empty() {
             if self.search.is_empty() {
                 self.message = "E35: No previous search pattern".to_string();
@@ -190,10 +193,11 @@ impl Editor {
         // fold — a forward search always starts from the end of the closed fold, while
         // a backwards search starts from the start of the closed fold".
         let from = self.search_start(direction);
+        let wrap = self.options.borrow().wrapscan;
         let found = self
             .search
             .match_at(from)
-            .or_else(|| self.search.next_from(from, direction));
+            .or_else(|| self.search.next_from(from, direction, wrap));
         match found {
             Some((start, _)) if start != from => {
                 // A search that moves the cursor is a jump: `''` comes back here.
@@ -231,6 +235,27 @@ impl Editor {
         self.after_edit();
     }
 
+    /// Whether the matches of the search are drawn: `'hlsearch'` unless
+    /// `:nohlsearch` has turned them off since the last search.
+    pub(crate) fn search_is_highlighted(&self) -> bool {
+        self.options.borrow().hlsearch && !self.nohlsearch
+    }
+
+    /// `:nohlsearch`: stop drawing the matches until a search is used again.
+    ///
+    /// The setting is not touched — that is the difference from
+    /// `:set nohlsearch`, and the reason both exist.
+    pub(crate) fn search_highlight_off(&mut self) {
+        self.nohlsearch = true;
+        self.redraw = true;
+    }
+
+    /// A search was used: the highlighting comes back, whatever `:nohlsearch`
+    /// said.
+    pub(crate) fn search_highlight_on(&mut self) {
+        self.nohlsearch = false;
+    }
+
     /// Show where the pattern being typed matches — `'incsearch'`.
     ///
     /// The search is run for real, so what is highlighted is the pattern being
@@ -246,6 +271,10 @@ impl Editor {
         };
         if !self.options.borrow().incsearch {
             return;
+        }
+        // A preview is a search being used, so it brings the highlighting back.
+        if !self.cmdline.is_empty() {
+            self.search_highlight_on();
         }
         let start = match &self.incsearch {
             Some(preview) => preview.start,
@@ -293,10 +322,11 @@ impl Editor {
         self.cursor = start;
         let from = self.search_start(direction);
         self.cursor = here;
+        let wrap = self.options.borrow().wrapscan;
         let found = self
             .search
             .match_at(from)
-            .or_else(|| self.search.next_from(from, direction));
+            .or_else(|| self.search.next_from(from, direction, wrap));
         match found {
             Some((at, _)) => {
                 self.goto_match(at);
@@ -321,7 +351,8 @@ impl Editor {
             return;
         }
         let here = self.search.match_at(self.cursor.char_idx(&self.buffer));
-        if let Some((at, _)) = here.and_then(|(at, _)| self.search.next_from(at, direction)) {
+        let wrap = self.options.borrow().wrapscan;
+        if let Some((at, _)) = here.and_then(|(at, _)| self.search.next_from(at, direction, wrap)) {
             self.goto_match(at);
         }
     }

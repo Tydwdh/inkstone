@@ -171,6 +171,15 @@ settings! {
     Number as number: bool = false,
     /// Whether a search ignores case.
     IgnoreCase as ignorecase: bool = false,
+    /// Whether every match of the search is highlighted.
+    ///
+    /// Vim has this off by default and this editor has always highlighted
+    /// matches, so it starts on: `:set nohlsearch` is the way out, and
+    /// `:nohlsearch` turns the display off without changing the setting.
+    HlSearch as hlsearch: bool = true,
+    /// Whether a search wraps at the end of the file. `:set nowrapscan` is what
+    /// makes a search *report* that there is nothing after the last match.
+    WrapScan as wrapscan: bool = true,
     /// Whether a search shows its match while the pattern is still being typed.
     IncSearch as incsearch: bool = true,
     /// Whether to colour code by what it is.

@@ -183,6 +183,7 @@ impl CommandRegistry {
         search_backward,
         search_next,
         search_previous,
+        nohlsearch,
         escape,
         save,
         save_force,
@@ -1469,6 +1470,20 @@ fn search_backward(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     Ok(())
 }
 
+/// `:nohlsearch` — stop drawing the matches of the search that is up.
+///
+/// The pattern stays: `n` and `N` still walk it, and using any search brings the
+/// highlighting back. That is the difference from `:set nohlsearch`, which is a
+/// setting and stays off.
+fn nohlsearch(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    if editor.search.is_empty() {
+        editor.message = "E35: No previous search pattern".to_string();
+        return Ok(());
+    }
+    editor.search_highlight_off();
+    Ok(())
+}
+
 /// `n` — the next match, the same way round as the search that is up.
 fn search_next(editor: &mut Editor, params: &[Param]) -> Result<()> {
     let (row, col) = (editor.cursor.row, editor.cursor.col);
@@ -1661,10 +1676,14 @@ fn repeat_search(editor: &mut Editor, count: usize, reversed: bool) {
     } else {
         editor.search.direction()
     };
+    // Using a search brings the highlighting back: that is what `:nohlsearch`
+    // promises to undo, and it does not change the setting.
+    editor.search_highlight_on();
+    let wrap = editor.options.borrow().wrapscan;
     let mut at = editor.cursor.char_idx(&editor.buffer);
     let mut found = None;
     for _ in 0..count {
-        match editor.search.next_from(at, direction) {
+        match editor.search.next_from(at, direction, wrap) {
             Some((start, _)) => {
                 found = Some(start);
                 at = start;

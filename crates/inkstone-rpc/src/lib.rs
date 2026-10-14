@@ -704,8 +704,8 @@ pub enum ServerMsg {
 ///
 /// MessagePack's *compact* form (`to_vec`), not the named one: a struct becomes
 /// an array of its fields instead of a map keyed by field names, which for a
-/// full screen is worth 2.1x (63 KiB → 31 KiB for 80x24 of cells, and the grid
-/// is sent again on every keystroke). Both sides of the wire are in this
+/// full screen is worth about 5x (63 KiB → 12 KiB for 80x24 of cells, and the
+/// grid is sent again on every keystroke). Both sides of the wire are in this
 /// workspace and the round-trip tests cover it, so the names buy nothing.
 pub fn write_msg<W, M>(w: &mut W, msg: &M) -> Result<()>
 where

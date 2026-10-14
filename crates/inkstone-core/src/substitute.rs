@@ -67,8 +67,10 @@ pub enum SubstituteError {
     /// A flag that is not one.
     #[error("E488: Trailing characters: {0}")]
     Flag(char),
-    /// A pattern that asked for something this cannot do.
-    #[error("{0}")]
+    /// A pattern that asked for something this cannot do. The `E54` belongs in
+    /// the text here: a `:` line prints the error as it is, while a failed
+    /// search adds the same code in front of the engine's own explanation.
+    #[error("E54: {0}")]
     Dialect(crate::dialect::DialectError),
 }
 

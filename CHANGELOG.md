@@ -17,6 +17,13 @@
   decided once, at startup, decided about no file at all. The daemon also ticks
   whether or not a server is running yet, since the tick that starts one is the
   one before there is one.
+- A pattern this editor refuses to translate — `\zs` or `\ze`, which would move
+  where a match starts or ends inside itself — now says the same thing wherever
+  it is typed. A `:s` said `E: \zs is not supported: …`, the code cut down to a
+  bare `E:`; the same refusal through `/` said `E54: E: \zs is not supported: …`,
+  the code twice. The code belongs to the error that knows it is an `E54` and
+  not to the sentence both share, so both now read `E54: \zs is not supported: a
+  match here is a stretch of text and cannot be cut in half`.
 
 ### Added
 - `gr` goes to the first place a reference answer names — the list is what the

@@ -32,9 +32,7 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DialectError {
     /// A pattern that says where a match starts or ends in the middle of itself.
-    #[error(
-        "E: {0} is not supported: a match here is a stretch of text and cannot be cut in half"
-    )]
+    #[error("{0} is not supported: a match here is a stretch of text and cannot be cut in half")]
     NotSupported(&'static str),
 }
 

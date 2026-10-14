@@ -13707,6 +13707,30 @@ mod tests {
         feed(&mut ed, ":s/(unclosed/1/<Enter>");
         assert!(ed.message.starts_with("E54: "), "{}", ed.message);
         assert!(!ed.is_dirty());
+
+        // A pattern that asks where a match starts inside itself is refused, and
+        // named: the engine cannot cut a match in half, and the refusal is
+        // already an `E54` — it must not say `E54: E: …`.
+        feed(&mut ed, ":s/\\zs/x/<Enter>");
+        assert_eq!(
+            ed.message,
+            "E54: \\zs is not supported: a match here is a stretch of text and cannot be cut in half"
+        );
+        assert!(!ed.is_dirty());
+    }
+
+    #[test]
+    fn a_refused_pattern_says_which_one_and_why() {
+        // The same refusal reaches a person through `/` and through `:s`, and
+        // both should say the same thing: the code, the thing that is not
+        // supported, and the reason.
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one\n");
+        feed(&mut ed, "/\\zs<Enter>");
+        assert_eq!(
+            ed.message,
+            "E54: \\zs is not supported: a match here is a stretch of text and cannot be cut in half"
+        );
     }
 
     #[test]

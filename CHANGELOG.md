@@ -34,9 +34,13 @@
   answers, the settings) stay read-only: a list that can be edited is a list that
   can lie about what it says.
 - `'cmdwinheight'` says how many screen lines that window uses, seven by default;
-  there is no nesting (`E1292: Command-line window is already open`); and `<C-c>`
+  there is no nesting (`E1292: Command-line window is already open`); `<C-c>`
   continues in Command-line mode with the line under the cursor, leaving the window
-  where it is.
+  where it is; and every command that would leave the window — another file,
+  another window, another tab, a list window of its own — says `E11: Invalid in
+  command-line window; :q<CR> closes the window`. `:q` there throws the window
+  away without asking about changes, since what was edited in it is discarded by
+  design.
 - `'suffixesadd'`: suffixes `gf` tries when the name as written is not there, so
   `:set suffixesadd=.rs` finds `main.rs` from `main`. The name as written is
   looked for over every `'path'` entry first, so what a person typed wins over

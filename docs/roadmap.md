@@ -3072,6 +3072,32 @@ the window is in rather than the text in it.
 - **Left for later:** the `E11` rule that disables every command which would move
   to another window or edit another buffer while the window is up, and `'cedit'`.
 
+## Done — the `E11` rule, and `:q` that throws the window away
+
+The last of the command-line window's rules: what it refuses, and what closing it
+means.
+
+- **What shipped:** every command that would leave the window says `E11: Invalid
+  in command-line window; :q<CR> closes the window` — another file (`:e`, `:b`,
+  `:bn`), another window (`:sp`, `:vs`, the `<C-w>` keys), another tab, or a list
+  window of its own (`:copen`, `:lopen`, `K`, `gd`) — and `:q` there closes the
+  window without asking about changes, because "other text edits are discarded
+  when closing the window" is what the window is for.
+- **Constraints it had to respect, and how:** vim flags the commands that *are*
+  allowed in the window (`EX_CMDWIN`) and refuses the rest; with a registry this
+  size the smaller set to keep in step is the one that is *refused*, so that is
+  what is written down — with a comment saying so, because the two lists have to
+  stay in step either way. The `:q` rule is the same idea from the other side: a
+  file asks before throwing work away, and a command-line window does not, since
+  it is a scratch window by definition.
+- **What the test found:** `:q` after editing a line in the window said `E37` —
+  the *file* rule, applied to a window whose whole point is that its edits are
+  thrown away. The refusal is what a person would meet the moment they edited a
+  line and then changed their mind.
+- **Files:** `inkstone-core` (`moves_window_or_buffer`, the guard in `run_command`,
+  `quit`'s history-window arm).
+- **Left for later:** `'cedit'`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

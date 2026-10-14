@@ -283,3 +283,33 @@ fn the_command_line_window_has_its_own_rules() {
     assert_eq!(ed.mode, Mode::Normal);
     assert_eq!(ed.list, Some(List::Commands));
 }
+
+#[test]
+fn the_command_line_window_refuses_what_would_leave_it() {
+    // "It is not possible to move to another window or edit another buffer. All
+    // commands that would do this are disabled in the command-line window."
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\n");
+    ed.viewport = crate::screen::Viewport::new(40, 12);
+    feed(&mut ed, ":set number<Enter>");
+    feed(&mut ed, "q");
+    feed(&mut ed, ":");
+    assert_eq!(ed.list, Some(List::Commands));
+
+    for refused in ["e other.txt", "sp", "vs", "tabnew", "bn", "lopen", "copen"] {
+        feed(&mut ed, &format!(":{refused}<Enter>"));
+        assert_eq!(
+            ed.message, "E11: Invalid in command-line window; :q<CR> closes the window",
+            "{refused} should be refused"
+        );
+        assert_eq!(ed.windows.len(), 2, "and nothing moved: {refused}");
+        assert_eq!(ed.list, Some(List::Commands), "still the window: {refused}");
+    }
+
+    // What edits *the window* is allowed, and `:q` closes it.
+    feed(&mut ed, "x");
+    assert_eq!(ed.message, "", "editing the window is what it is for");
+    feed(&mut ed, ":q<Enter>");
+    assert_eq!(ed.list, None, "the window closed");
+    assert_eq!(ed.windows.len(), 1);
+}

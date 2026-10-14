@@ -73,6 +73,18 @@ impl Editor {
     /// Run a named command, then drain anything Lua queued while running it.
     pub(crate) fn run_command(&mut self, name: &str, params: &[Param]) {
         let name = name.to_string();
+        // "The command-line window is not a normal window. It is not possible to
+        // move to another window or edit another buffer. All commands that would
+        // do this are disabled in the command-line window." Vim marks the
+        // commands that *are* allowed (its `EX_CMDWIN` flag) and refuses the rest
+        // with `E11`; this lists the ones it refuses, because the set of commands
+        // that change the window or the buffer is the smaller one to keep in step
+        // with the registry.
+        if self.in_history_window() && moves_window_or_buffer(&name) {
+            self.message =
+                "E11: Invalid in command-line window; :q<CR> closes the window".to_string();
+            return;
+        }
         // One command is one step in the history — a counted `3x` is a single
         // change to a user — and so is a whole insert session. The two nest:
         // the group opened here closes before this returns, and entering or
@@ -950,4 +962,55 @@ impl Editor {
     pub(super) fn unmapped(&mut self, encoded: &str) {
         self.message = format!("unmapped key: {encoded}");
     }
+}
+
+/// Whether a command moves to another window, or edits another buffer, which is
+/// what a command-line window refuses.
+///
+/// The list is vim's own rule written the other way round: it flags the commands
+/// that are *allowed* there and refuses the rest, while this names the ones that
+/// are refused, because that is the set a registry this size can keep in step.
+fn moves_window_or_buffer(name: &str) -> bool {
+    matches!(
+        name,
+        // Another file in this window.
+        "edit_file"
+            | "edit_file_force"
+            | "buffer_go"
+            | "buffer_next"
+            | "buffer_previous"
+            | "buffer_delete"
+            | "buffer_next_force"
+            | "buffer_previous_force"
+            | "buffer_delete_force"
+            | "open_place"
+            // Another window, or a change to this one's place on the screen.
+            | "split_rows"
+            | "split_columns"
+            | "tab_split"
+            | "window_only"
+            | "window_next"
+            | "window_left"
+            | "window_right"
+            | "window_up"
+            | "window_down"
+            | "close_other_windows"
+            | "equalize_windows"
+            // Another tab.
+            | "tab_new"
+            | "tab_close"
+            | "tab_next"
+            | "tab_previous"
+            | "list_tabs"
+            // A list window of their own.
+            | "open_places"
+            | "close_places"
+            | "open_diagnostics"
+            | "close_diagnostics"
+            | "list_older"
+            | "list_newer"
+            | "hover"
+            | "goto_definition"
+            | "goto_references"
+    )
 }

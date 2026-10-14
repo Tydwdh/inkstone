@@ -1865,6 +1865,15 @@ fn save_force(editor: &mut Editor, params: &[Param]) -> Result<()> {
 }
 
 fn quit(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    // In a command-line window `:q` "discard[s] the command line and go[es] back
+    // to Normal mode": what was edited there is thrown away by design — "other
+    // text edits are discarded when closing the window" — so it does not ask
+    // about changes the way a file does.
+    if editor.in_history_window() {
+        let window = editor.current_window;
+        editor.close_window(window);
+        return Ok(());
+    }
     // With more than one window, `:q` closes this one; the last one quits the
     // session.
     if editor.windows.len() > 1 {

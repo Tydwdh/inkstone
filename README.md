@@ -411,7 +411,11 @@ edited, and `<CR>` runs the one under the cursor — a command for `q:`, a searc
 what the command did is not half a screen down, and an edit that is not run goes with
 it. `'cmdwinheight'` says how tall the window is, there is no nesting — `q:` inside one
 says `E1292: Command-line window is already open` — and `<C-c>` puts the line under
-the cursor back on the command line to keep typing, with the window still there. A command run from a script is not
+the cursor back on the command line to keep typing, with the window still there.
+Nothing that would leave it works while it is up — `:e`, `:sp`, `:tabnew`, `:bn`
+and the rest say `E11: Invalid in command-line window; :q<CR> closes the window` —
+and `:q` throws the window away without asking, because what was edited there is
+discarded by design. A command run from a script is not
 in the history: it is what a *person* typed.
 
 `gf` opens the file whose name is under the cursor — read as a *file name* rather

@@ -43,6 +43,10 @@ pub enum BufferError {
     /// A write was attempted on a buffer that has never had a path.
     #[error("E32: No file name")]
     NoPath,
+    /// The file changed on disk since this buffer read it, so writing would throw
+    /// away somebody else's work.
+    #[error("E13: File exists (add ! to override): {}", .0.display())]
+    Changed(PathBuf),
 }
 
 /// An editable document.
@@ -50,7 +54,10 @@ pub enum BufferError {
 pub struct Buffer {
     rope: Rope,
     path: Option<PathBuf>,
-    dirty: bool,
+    /// What the file looked like when this buffer last read or wrote it: its
+    /// length and its modification time. `None` means there is nothing on disk to
+    /// compare with — a scratch buffer, or a path that did not exist.
+    stamp: Option<(u64, std::time::SystemTime)>,
 }
 
 impl Buffer {
@@ -59,8 +66,14 @@ impl Buffer {
         Self {
             rope: Rope::from("\n"),
             path: None,
-            dirty: false,
+            stamp: None,
         }
+    }
+
+    /// What the file on disk looks like now, if it is there at all.
+    fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some((metadata.len(), metadata.modified().ok()?))
     }
 
     /// Load `path`, or create an empty buffer bound to it if it does not exist.
@@ -71,7 +84,7 @@ impl Buffer {
             return Ok(Self {
                 rope: Rope::from("\n"),
                 path: Some(path.to_path_buf()),
-                dirty: false,
+                stamp: None,
             });
         }
         let bytes = std::fs::read(path)?;
@@ -80,7 +93,7 @@ impl Buffer {
         let mut buf = Self {
             rope: Rope::from_str(&text),
             path: Some(path.to_path_buf()),
-            dirty: false,
+            stamp: Self::stamp_of(path),
         };
         buf.normalize();
         Ok(buf)
@@ -91,7 +104,7 @@ impl Buffer {
         let mut buf = Self {
             rope: Rope::from_str(text),
             path: None,
-            dirty: false,
+            stamp: None,
         };
         buf.normalize();
         buf
@@ -99,15 +112,33 @@ impl Buffer {
 
     /// Write the buffer to `path`, or to its own path when `path` is `None`.
     ///
-    /// On success the buffer becomes clean and is bound to the written path.
+    /// On success the buffer is bound to the written path. Whether the buffer is
+    /// *modified* is not a fact about the text, so it is not recorded here: it
+    /// is whether the undo state the text is in is the one that was written,
+    /// which the edit history answers.
     pub fn save(&mut self, path: Option<&Path>) -> Result<PathBuf, BufferError> {
+        self.save_with(path, false)
+    }
+
+    /// The same, but writing even when the file changed underneath.
+    ///
+    /// A write is refused when the file on disk is not the one this buffer read:
+    /// something else has written it, and the buffer's text is not what a person
+    /// would expect to be replacing. `:w!` says they know, and writes anyway.
+    pub fn save_with(&mut self, path: Option<&Path>, force: bool) -> Result<PathBuf, BufferError> {
         let target = match path {
             Some(p) => p.to_path_buf(),
             None => self.path.clone().ok_or(BufferError::NoPath)?,
         };
+        if !force {
+            let on_disk = Self::stamp_of(&target);
+            if on_disk.is_some() && on_disk != self.stamp {
+                return Err(BufferError::Changed(target));
+            }
+        }
         std::fs::write(&target, self.text())?;
         self.path = Some(target.clone());
-        self.dirty = false;
+        self.stamp = Self::stamp_of(&target);
         Ok(target)
     }
 
@@ -116,11 +147,6 @@ impl Buffer {
     /// Where this buffer came from, if anywhere. `None` means a scratch buffer.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
-    }
-
-    /// Whether it has been changed since the last load or save.
-    pub fn is_dirty(&self) -> bool {
-        self.dirty
     }
 
     /// The name to show in the status line.
@@ -135,6 +161,14 @@ impl Buffer {
     /// The whole document as it would be written to disk.
     pub fn text(&self) -> String {
         self.rope.to_string()
+    }
+
+    /// The text in the character range `[start, end)`, clamped to the buffer.
+    pub fn slice_text(&self, start: usize, end: usize) -> String {
+        let len = self.len_chars();
+        let start = start.min(len);
+        let end = end.clamp(start, len);
+        self.rope.slice(start..end).to_string()
     }
 
     /// Length in characters, terminator included.
@@ -213,25 +247,52 @@ impl Buffer {
 
     // -- mutation -----------------------------------------------------------
 
-    /// Insert `s` at character index `char_idx`.
-    pub fn insert(&mut self, char_idx: usize, s: &str) {
-        let idx = char_idx.min(self.len_chars());
-        self.rope.insert(idx, s);
-        self.normalize();
-        self.dirty = true;
-    }
-
-    /// Delete characters in `[start, end)`.
-    pub fn remove(&mut self, start: usize, end: usize) {
+    /// The characters in `[start, end)`, as a string. An end beyond the end of
+    /// the buffer is clamped, the way [`Buffer::replace_range`] clamps.
+    pub fn text_range(&self, start: usize, end: usize) -> String {
         let len = self.len_chars();
         let start = start.min(len);
         let end = end.clamp(start, len);
-        if start == end {
+        self.rope.slice(start..end).chunks().collect()
+    }
+
+    /// Replace the characters in `[start, end)` with `text`.
+    ///
+    /// This is the only way text changes, and the trailing-newline invariant is
+    /// restored once, after both halves have happened. That matters to undo: a
+    /// step that takes the last terminator is put back by a removal followed by
+    /// an insertion, and a buffer that repaired its newline in between would
+    /// come back with one newline too many.
+    pub fn replace_range(&mut self, start: usize, end: usize, text: &str) {
+        let len = self.len_chars();
+        let start = start.min(len);
+        let end = end.clamp(start, len);
+        if start == end && text.is_empty() {
             return;
         }
         self.rope.remove(start..end);
+        self.rope.insert(start, text);
         self.normalize();
-        self.dirty = true;
+    }
+
+    /// The character index of the grapheme boundary strictly after the grapheme
+    /// that starts at `char_idx`.
+    ///
+    /// Used where a cursor sits *before* something — `p` puts its text after the
+    /// character under the cursor, and a wide grapheme is one character with two
+    /// cells in it.
+    pub fn next_grapheme_boundary(&self, char_idx: usize) -> usize {
+        let len = self.len_chars();
+        let idx = char_idx.min(len);
+        if idx >= len {
+            return len;
+        }
+        let end = (idx + GRAPHEME_LOOKBACK).min(len);
+        let window: String = self.rope.slice(idx..end).to_string();
+        match window.graphemes(true).next() {
+            Some(grapheme) => idx + grapheme.chars().count(),
+            None => idx,
+        }
     }
 
     /// The character index of the grapheme boundary strictly before `char_idx`.
@@ -295,24 +356,22 @@ mod tests {
         assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.line_string(0), "");
         assert_eq!(buf.len_chars(), 1);
-        assert!(!buf.is_dirty());
     }
 
     #[test]
     fn trailing_newline_invariant_holds_after_edits() {
         let mut buf = Buffer::empty();
-        buf.insert(0, "hello");
+        buf.replace_range(0, 0, "hello");
         assert_eq!(buf.text(), "hello\n");
-        buf.remove(5, 6); // delete the newline itself
+        buf.replace_range(5, 6, ""); // delete the newline itself
         assert_eq!(buf.text(), "hello\n", "final newline is restored");
-        assert!(buf.is_dirty());
     }
 
     #[test]
     fn deleting_a_mid_file_newline_joins_lines() {
         let mut buf = Buffer::from_text("alpha\nbeta\n");
         assert_eq!(buf.line_count(), 2);
-        buf.remove(5, 6); // the newline after "alpha"
+        buf.replace_range(5, 6, ""); // the newline after "alpha"
         assert_eq!(buf.text(), "alphabeta\n");
         assert_eq!(buf.line_count(), 1);
         assert_eq!(buf.line_string(0), "alphabeta");
@@ -321,7 +380,7 @@ mod tests {
     #[test]
     fn removing_everything_leaves_one_empty_line() {
         let mut buf = Buffer::from_text("abc\ndef\n");
-        buf.remove(0, buf.len_chars());
+        buf.replace_range(0, buf.len_chars(), "");
         assert_eq!(buf.text(), "\n");
         assert_eq!(buf.line_count(), 1);
     }
@@ -378,7 +437,32 @@ mod tests {
     }
 
     #[test]
-    fn from_path_round_trips_and_tracks_cleanliness() {
+    fn next_grapheme_boundary_steps_over_whole_clusters() {
+        let buf = Buffer::from_text("e\u{301}x\n");
+        assert_eq!(
+            buf.next_grapheme_boundary(0),
+            2,
+            "the combining pair is one"
+        );
+        assert_eq!(buf.next_grapheme_boundary(2), 3);
+        assert_eq!(
+            buf.next_grapheme_boundary(3),
+            4,
+            "the terminator is one too"
+        );
+        assert_eq!(
+            buf.next_grapheme_boundary(4),
+            4,
+            "and the end stays the end"
+        );
+
+        let cjk = Buffer::from_text("你好\n");
+        assert_eq!(cjk.next_grapheme_boundary(0), 1, "one character each");
+        assert_eq!(cjk.next_grapheme_boundary(1), 2);
+    }
+
+    #[test]
+    fn from_path_round_trips_and_binds_the_path() {
         let dir = std::env::temp_dir().join("inkstone-buffer-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("round-trip.txt");
@@ -389,17 +473,14 @@ mod tests {
         assert_eq!(buf.text(), "\n");
         assert_eq!(buf.path(), Some(path.as_path()));
         assert_eq!(buf.display_name(), "round-trip.txt");
-        assert!(!buf.is_dirty());
 
-        buf.insert(0, "line one");
-        assert!(buf.is_dirty());
+        buf.replace_range(0, 0, "line one");
         let written = buf.save(None).unwrap();
         assert_eq!(written, path);
-        assert!(!buf.is_dirty());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "line one\n");
 
         let reloaded = Buffer::from_path(&path).unwrap();
         assert_eq!(reloaded.text(), "line one\n");
-        assert!(!reloaded.is_dirty());
 
         // Existing file without a trailing newline gets normalized on load.
         std::fs::write(&path, "no newline").unwrap();
@@ -422,7 +503,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         let mut buf = Buffer::empty();
-        buf.insert(0, "written");
+        buf.replace_range(0, 0, "written");
         buf.save(Some(&path)).unwrap();
         assert_eq!(buf.path(), Some(path.as_path()));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "written\n");
@@ -445,14 +526,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("no-such-dir").join("deep.txt");
         let mut buf = Buffer::from_text("x\n");
-        buf.insert(0, "dirty");
-        assert!(buf.is_dirty());
+        buf.replace_range(0, 0, "dirty");
         let err = buf.save(Some(&path)).unwrap_err();
         assert!(matches!(err, BufferError::Io(_)), "got {err:?}");
-        assert!(
-            buf.is_dirty(),
-            "a failed save must not clear the dirty flag"
-        );
     }
 
     #[test]
@@ -491,10 +567,11 @@ mod tests {
     #[test]
     fn editing_never_rewrites_the_bytes_on_disk() {
         let mut buf = Buffer::from_text("a\r\nb\r\n");
-        buf.insert(buf.line_col_to_char(0, 1), "X");
+        let after_a = buf.line_col_to_char(0, 1);
+        buf.replace_range(after_a, after_a, "X");
         assert_eq!(buf.text(), "aX\r\nb\r\n");
         let (start, end) = (0, buf.line_len(0) + buf.line_terminator_len(0));
-        buf.remove(start, end);
+        buf.replace_range(start, end, "");
         assert_eq!(buf.text(), "b\r\n");
     }
 }

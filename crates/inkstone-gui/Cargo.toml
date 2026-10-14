@@ -1,0 +1,22 @@
+[package]
+name = "inkstone-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "inkstone: a windowed frontend that draws the daemon's grid on the GPU"
+
+[[bin]]
+name = "inkstone-gui"
+path = "src/main.rs"
+
+[dependencies]
+inkstone-rpc.workspace = true
+inkstone-client.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+winit = "0.30"
+wgpu = "30"
+cosmic-text = "0.19"
+arboard = "3"
+pollster = "0.4"

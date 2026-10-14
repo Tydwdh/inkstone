@@ -1,26 +1,29 @@
 //! `inkstone` — the terminal frontend.
 //!
 //! The frontend is deliberately dumb: it translates terminal events into
-//! [`ClientMsg`]s, and blits whatever [`ServerMsg`] grid comes back. It holds
-//! no editor state at all, so a future GUI or a remote client can reuse the
-//! daemon unchanged.
+//! [`ClientMsg`]s, and blits the rows the daemon sends. It holds no editor
+//! state at all, which is what lets a windowed frontend draw the same screen.
+//! Everything below the drawing — finding and starting the daemon, framing,
+//! folding frames into a `Screen` — is [`inkstone_client`].
 
-use std::io::{self, BufReader, Write};
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::thread;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use crossterm::event::{self, Event, KeyEventKind};
+#[cfg(unix)]
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::style::{Attribute, Color as CtColor, Colors, Print, SetAttribute, SetColors};
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{cursor, execute, queue, terminal};
+use inkstone_client::Daemon;
 
 use inkstone_rpc::{
-    read_server_msg, write_client_msg, ClientMsg, Color, Grid, KeyCode, KeyMsg, Mod, Param,
-    ServerMsg, ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLINE,
+    ClientMsg, Color, KeyCode, KeyMsg, Mod, Param, PointerKind, PointerMsg, Screen, ServerMsg,
+    ATTR_BOLD, ATTR_FAINT, ATTR_ITALIC, ATTR_REVERSE, ATTR_STRIKETHROUGH, ATTR_UNDERLINE,
 };
 
 #[derive(Debug, Parser)]
@@ -40,82 +43,66 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let server = resolve_server(args.server)?;
+    let mut daemon = Daemon::spawn(args.server)?;
 
-    let mut child = Command::new(&server)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .with_context(|| {
-            let looked_next_to = std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|dir| dir.display().to_string()))
-                .unwrap_or_else(|| "?".to_string());
-            format!(
-                "failed to start the daemon at {}\n\
-                 looked for it next to:   {}\n\
-                 build it first:          cargo build --workspace\n\
-                 or point at it:          inkstone --server <PATH>",
-                server.display(),
-                looked_next_to,
-            )
-        })?;
-
-    let stdin = child.stdin.take().expect("piped stdin");
-    let stdout = child.stdout.take().expect("piped stdout");
-
-    let server_rx = spawn_server_reader(stdout);
     let input_tx = spawn_input_reader();
 
     install_panic_hook();
 
     let result = {
         let _guard = TerminalGuard::new()?;
-        run(stdin, server_rx, input_tx, args.file)
+        run(&mut daemon, input_tx, args.file)
     };
 
     // Restore the terminal before waiting on the daemon, so a hung child
     // cannot leave the user in raw mode.
-    drop(child.stdin.take());
-    let _ = child.wait();
+    let _ = daemon.wait();
     result
 }
 
 /// The main event loop. Returns when the daemon or the terminal goes away.
-fn run(
-    mut stdin: std::process::ChildStdin,
-    server_rx: Receiver<ServerMsg>,
-    input_rx: Receiver<ClientMsg>,
-    file: Option<PathBuf>,
-) -> Result<()> {
+fn run(daemon: &mut Daemon, input_rx: Receiver<ClientMsg>, file: Option<PathBuf>) -> Result<()> {
     let (cols, rows) = terminal::size().context("failed to read the terminal size")?;
-    send(&mut stdin, &ClientMsg::Resize { cols, rows })?;
+    daemon.send(&ClientMsg::Resize { cols, rows })?;
     if let Some(path) = file {
-        send(
-            &mut stdin,
-            &ClientMsg::Command {
-                name: "edit_file".to_string(),
-                params: vec![Param::Str(path.to_string_lossy().into_owned())],
-            },
-        )?;
+        daemon.send(&ClientMsg::Command {
+            name: "edit_file".to_string(),
+            params: vec![Param::Str(path.to_string_lossy().into_owned())],
+        })?;
     }
 
+    // The screen as the daemon has drawn it: a full frame replaces it and every
+    // frame after that carries the rows that changed, so this is neither editor
+    // state nor a guess — it is what is on the glass.
+    let mut screen = Screen::new();
+    let frames = daemon.frames().clone();
     loop {
         crossbeam_channel::select! {
-            recv(server_rx) -> message => match message {
-                Ok(ServerMsg::Redraw { grid, cursor, cursor_visible }) => {
-                    draw(&mut io::stdout().lock(), &grid, cursor, cursor_visible)?;
+            recv(frames) -> message => match message {
+                Ok(ServerMsg::Redraw { grid, cursor, cursor_visible, insert }) => {
+                    let rows = screen.redraw(grid, cursor, cursor_visible, insert);
+                    draw(&mut io::stdout().lock(), &screen, &rows)?;
+                }
+                Ok(ServerMsg::Rows { updates, cursor, cursor_visible, insert }) => {
+                    let rows = screen.rows(&updates, cursor, cursor_visible, insert);
+                    draw(&mut io::stdout().lock(), &screen, &rows)?;
+                }
+                Ok(ServerMsg::Clipboard(text)) => {
+                    // A terminal's clipboard is the terminal's: ask for it and
+                    // carry on.
+                    let mut out = io::stdout().lock();
+                    out.write_all(&osc52(&text))?;
+                    out.flush()?;
                 }
                 Ok(ServerMsg::Quit) => {
-                    let _ = send(&mut stdin, &ClientMsg::Shutdown);
+                    let _ = daemon.send(&ClientMsg::Shutdown);
                     break;
                 }
                 // The daemon hung up: nothing left to draw, so leave cleanly.
                 Err(_) => break,
             },
             recv(input_rx) -> message => match message {
-                Ok(message) => send(&mut stdin, &message)?,
+                Ok(message) => daemon.send(&message)?,
                 Err(_) => break,
             },
         }
@@ -123,32 +110,9 @@ fn run(
     Ok(())
 }
 
-fn send(stdin: &mut impl Write, msg: &ClientMsg) -> Result<()> {
-    write_client_msg(stdin, msg).context("failed to send a message to the daemon")?;
-    stdin.flush().context("failed to flush the daemon pipe")?;
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Threads
 // ---------------------------------------------------------------------------
-
-/// Decode daemon frames on a helper thread so the main loop can select.
-fn spawn_server_reader(stdout: std::process::ChildStdout) -> Receiver<ServerMsg> {
-    let (tx, rx) = unbounded();
-    thread::Builder::new()
-        .name("inkstone-rpc-reader".to_string())
-        .spawn(move || {
-            let mut input = BufReader::new(stdout);
-            while let Ok(Some(message)) = read_server_msg(&mut input) {
-                if tx.send(message).is_err() {
-                    return;
-                }
-            }
-        })
-        .expect("failed to spawn the reader thread");
-    rx
-}
 
 /// Read terminal events on a helper thread and forward them as client messages.
 fn spawn_input_reader() -> Receiver<ClientMsg> {
@@ -163,23 +127,13 @@ fn spawn_input_reader() -> Receiver<ClientMsg> {
 fn input_loop(tx: Sender<ClientMsg>) {
     loop {
         match event::read() {
-            Ok(Event::Key(key)) => {
-                if key.kind == KeyEventKind::Release {
-                    continue;
-                }
-                if let Some(key) = to_key_msg(key) {
-                    if tx.send(ClientMsg::Input(key)).is_err() {
+            Ok(event) => {
+                if let Some(msg) = to_client_msg(event) {
+                    if tx.send(msg).is_err() {
                         return;
                     }
                 }
             }
-            Ok(Event::Resize(cols, rows)) => {
-                if tx.send(ClientMsg::Resize { cols, rows }).is_err() {
-                    return;
-                }
-            }
-            // Focus and mouse events are not part of milestone 1.
-            Ok(_) => {}
             Err(e) => {
                 eprintln!("edit: terminal input error: {e}");
                 // Closing the channel ends the session.
@@ -187,6 +141,86 @@ fn input_loop(tx: Sender<ClientMsg>) {
             }
         }
     }
+}
+
+/// What one terminal event means to the daemon, if anything.
+///
+/// Focus and mouse events are not part of milestone 1, and a key the protocol
+/// cannot express is dropped rather than guessed at.
+/// Ask the terminal to put `text` on the system clipboard: OSC 52.
+///
+/// A terminal has no clipboard API of its own, and this is the escape sequence
+/// that asks the terminal's — `ESC ] 52 ; c ; <base64> BEL`. Terminals that do
+/// not know it ignore it, which is why it is sent and forgotten rather than
+/// waited on.
+fn osc52(text: &str) -> Vec<u8> {
+    format!("\x1b]52;c;{}\x07", base64(text.as_bytes())).into_bytes()
+}
+
+/// The standard base64 alphabet, for the one place that needs it.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
+        for shift in [18, 12, 6, 0] {
+            let index = ((n >> shift) & 0x3f) as usize;
+            out.push(ALPHABET[index] as char);
+        }
+        if chunk.len() < 3 {
+            out.pop();
+            if chunk.len() < 2 {
+                out.pop();
+            }
+            out.push('=');
+            if chunk.len() < 2 {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn to_client_msg(event: Event) -> Option<ClientMsg> {
+    match event {
+        Event::Key(key) => {
+            if key.kind == KeyEventKind::Release {
+                return None;
+            }
+            to_key_msg(key).map(ClientMsg::Input)
+        }
+        Event::Resize(cols, rows) => Some(ClientMsg::Resize { cols, rows }),
+        // The pointer, in screen cells: what a cell means is the daemon's
+        // business, so nothing is decided here.
+        Event::Mouse(mouse) => to_pointer_msg(mouse).map(ClientMsg::Pointer),
+        // A paste is text, not keys: sending it as keys would run whatever
+        // commands it happens to spell.
+        Event::Paste(text) => Some(ClientMsg::Text(text)),
+        _ => None,
+    }
+}
+
+/// The protocol's pointer event for a terminal mouse event, if it is one the
+/// protocol carries.
+///
+/// The middle and right buttons, and a bare move with nothing pressed, are not
+/// part of it: a frontend sends what it can, and the daemon ignores what it does
+/// not understand.
+fn to_pointer_msg(mouse: event::MouseEvent) -> Option<PointerMsg> {
+    let kind = match mouse.kind {
+        event::MouseEventKind::Down(event::MouseButton::Left) => PointerKind::Press,
+        event::MouseEventKind::Up(event::MouseButton::Left) => PointerKind::Release,
+        event::MouseEventKind::Drag(event::MouseButton::Left) => PointerKind::Drag,
+        event::MouseEventKind::ScrollUp => PointerKind::ScrollUp,
+        event::MouseEventKind::ScrollDown => PointerKind::ScrollDown,
+        _ => return None,
+    };
+    Some(PointerMsg::new(kind, mouse.column, mouse.row))
 }
 
 fn to_key_msg(key: event::KeyEvent) -> Option<KeyMsg> {
@@ -217,6 +251,10 @@ fn to_key_msg(key: event::KeyEvent) -> Option<KeyMsg> {
 /// The protocol key for a terminal key, if the protocol has one at all.
 fn to_key_code(code: event::KeyCode) -> Option<KeyCode> {
     Some(match code {
+        // A tab that arrives as the character rather than as the code: some
+        // terminals hand 0x09 over as a `\t` and some as a Tab, and a person
+        // pressing the key means the same thing either way.
+        event::KeyCode::Char('\t') => KeyCode::Tab,
         event::KeyCode::Char(c) => KeyCode::Char(c),
         event::KeyCode::Enter => KeyCode::Enter,
         event::KeyCode::Esc => KeyCode::Esc,
@@ -241,20 +279,18 @@ fn to_key_code(code: event::KeyCode) -> Option<KeyCode> {
 // Drawing
 // ---------------------------------------------------------------------------
 
-/// Blit a grid to the terminal.
+/// Blit the screen to the terminal: the rows in `rows`, then put the cursor.
 ///
 /// The grid is always fully populated (empty screen space is a `" "` cell), so
 /// drawing is a straight write with no clearing: a cell whose text is empty is
-/// the second half of a wide grapheme and is skipped.
-fn draw(
-    out: &mut impl Write,
-    grid: &Grid,
-    cursor: (u16, u16),
-    cursor_visible: bool,
-) -> io::Result<()> {
+/// the second half of a wide grapheme and is skipped. Only the rows that
+/// changed are written, which is what makes a keystroke cost a line rather than
+/// a screen.
+fn draw(out: &mut impl Write, screen: &Screen, rows: &[u16]) -> io::Result<()> {
+    let grid = screen.grid();
     let mut style = None;
 
-    for y in 0..grid.height {
+    for &y in rows {
         queue!(out, cursor::MoveTo(0, y))?;
         for x in 0..grid.width {
             let cell = grid.get(x, y);
@@ -276,8 +312,12 @@ fn draw(
     }
 
     queue!(out, SetAttribute(Attribute::Reset))?;
-    if cursor_visible {
-        queue!(out, cursor::MoveTo(cursor.0, cursor.1), cursor::Show)?;
+    if screen.cursor_visible() {
+        queue!(
+            out,
+            cursor::MoveTo(screen.cursor().0, screen.cursor().1),
+            cursor::Show
+        )?;
     } else {
         queue!(out, cursor::Hide)?;
     }
@@ -293,6 +333,15 @@ fn queue_attributes(out: &mut impl Write, attrs: u16) -> io::Result<()> {
     }
     if attrs & ATTR_REVERSE != 0 {
         queue!(out, SetAttribute(Attribute::Reverse))?;
+    }
+    if attrs & ATTR_ITALIC != 0 {
+        queue!(out, SetAttribute(Attribute::Italic))?;
+    }
+    if attrs & ATTR_FAINT != 0 {
+        queue!(out, SetAttribute(Attribute::Dim))?;
+    }
+    if attrs & ATTR_STRIKETHROUGH != 0 {
+        queue!(out, SetAttribute(Attribute::CrossedOut))?;
     }
     Ok(())
 }
@@ -318,12 +367,29 @@ impl TerminalGuard {
         terminal::enable_raw_mode().context("failed to enable raw mode")?;
         execute!(io::stdout(), EnterAlternateScreen)
             .context("failed to enter the alternate screen")?;
+        // The pointer, so a click can put the cursor where it pointed. A user
+        // who wants the terminal's own selection holds Shift, which is what
+        // every terminal application asks of them.
+        let _ = execute!(io::stdout(), event::EnableMouseCapture);
+        // Bracketed paste: the terminal then says "this was pasted", which
+        // becomes one `Text` message instead of a burst of keys — a paste of
+        // `dd` deletes a line, and one of `:q!` quits, otherwise.
+        //
+        // Only where crossterm can hear it: `Event::Paste` is parsed by its
+        // Unix backend (`event/sys/unix/parse.rs`) and has no Windows
+        // counterpart, so on Windows the markers would be characters the
+        // terminal decided to keep.
+        #[cfg(unix)]
+        let _ = execute!(io::stdout(), EnableBracketedPaste);
         Ok(Self)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        let _ = execute!(io::stdout(), event::DisableMouseCapture);
+        #[cfg(unix)]
+        let _ = execute!(io::stdout(), DisableBracketedPaste);
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
     }
@@ -339,37 +405,42 @@ fn install_panic_hook() {
     }));
 }
 
-/// Find the daemon: an explicit path, else a sibling of this executable, else
-/// whatever is on `PATH`.
-fn resolve_server(explicit: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(path) = explicit {
-        return Ok(path);
-    }
-    let name = if cfg!(windows) {
-        "inkstone-server.exe"
-    } else {
-        "inkstone-server"
-    };
-    let sibling = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(name)));
-    match sibling {
-        Some(path) if path.exists() => Ok(path),
-        // Not built (or moved): fall back to whatever is on `PATH`.
-        _ => Ok(PathBuf::from(name)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyModifiers};
-    use inkstone_rpc::Cell;
+    use inkstone_rpc::{Cell, Grid};
 
+    /// Render `grid` the way a full frame is drawn: every row, then the cursor.
     fn render(grid: &Grid, cursor: (u16, u16), visible: bool) -> String {
+        let mut screen = Screen::new();
         let mut out = Vec::new();
-        draw(&mut out, grid, cursor, visible).unwrap();
+        let rows = screen.redraw(grid.clone(), cursor, visible, false);
+        draw(&mut out, &screen, &rows).unwrap();
         String::from_utf8(out).expect("terminal output is valid utf-8")
+    }
+
+    #[test]
+    fn draw_writes_only_the_rows_it_is_given() {
+        let mut grid = Grid::new(3, 3);
+        for y in 0..3 {
+            grid.put(0, y, Cell::new("x"));
+        }
+        let mut screen = Screen::new();
+        screen.redraw(grid, (0, 0), true, false);
+
+        let mut out = Vec::new();
+        draw(&mut out, &screen, &[1]).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("\x1b[2;1H"),
+            "the row is drawn where it belongs: {text:?}"
+        );
+        assert_eq!(
+            text.matches('x').count(),
+            1,
+            "and nothing else is written: {text:?}"
+        );
     }
 
     #[test]
@@ -447,6 +518,16 @@ mod tests {
                 mods: vec![Mod::Alt]
             }
         );
+    }
+
+    #[test]
+    fn a_tab_is_the_tab_key_however_the_terminal_spells_it() {
+        // Some terminals hand 0x09 over as the Tab key and some as the
+        // character, and both mean the key: `<C-i>` and `<Tab>` are one byte.
+        let as_code = to_key_msg(key(event::KeyCode::Tab, KeyModifiers::NONE)).unwrap();
+        let as_char = to_key_msg(key(event::KeyCode::Char('\t'), KeyModifiers::NONE)).unwrap();
+        assert_eq!(as_code.code, KeyCode::Tab);
+        assert_eq!(as_char.code, KeyCode::Tab);
     }
 
     #[test]
@@ -538,6 +619,104 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_becomes_text_and_a_key_becomes_a_key() {
+        assert_eq!(
+            to_client_msg(Event::Paste("dd\nsecond".to_string())),
+            Some(ClientMsg::Text("dd\nsecond".to_string())),
+            "a paste is text: it must not be run as commands"
+        );
+        assert_eq!(
+            to_client_msg(event::Event::Resize(120, 40)),
+            Some(ClientMsg::Resize {
+                cols: 120,
+                rows: 40
+            })
+        );
+        assert_eq!(
+            to_client_msg(Event::Key(KeyEvent::new(
+                event::KeyCode::Char('x'),
+                KeyModifiers::empty()
+            ))),
+            Some(ClientMsg::Input(KeyMsg::new(KeyCode::Char('x'))))
+        );
+        // A key that is only released is not a key press, and a key the
+        // protocol cannot express is dropped rather than guessed at.
+        assert_eq!(
+            to_client_msg(Event::Key(KeyEvent::new_with_kind(
+                event::KeyCode::Char('x'),
+                KeyModifiers::empty(),
+                KeyEventKind::Release,
+            ))),
+            None
+        );
+        assert_eq!(
+            to_client_msg(Event::Key(KeyEvent::new(
+                event::KeyCode::F(5),
+                KeyModifiers::empty()
+            ))),
+            None
+        );
+        assert_eq!(to_client_msg(Event::FocusGained), None);
+    }
+
+    #[test]
+    fn base64_is_base64() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        // The bytes of a CJK character, which is what a real copy looks like.
+        assert_eq!(base64("你".as_bytes()), "5L2g");
+    }
+
+    #[test]
+    fn a_copy_asks_the_terminal_for_its_clipboard() {
+        assert_eq!(
+            String::from_utf8(osc52("hi")).unwrap(),
+            "\u{1b}]52;c;aGk=\u{7}",
+            "OSC 52, with the text in base64"
+        );
+    }
+
+    #[test]
+    fn a_mouse_event_becomes_a_pointer_event() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+        let mouse = |kind| MouseEvent {
+            kind,
+            column: 3,
+            row: 4,
+            modifiers: KeyModifiers::empty(),
+        };
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::Down(MouseButton::Left))),
+            Some(PointerMsg::new(PointerKind::Press, 3, 4))
+        );
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::Up(MouseButton::Left))),
+            Some(PointerMsg::new(PointerKind::Release, 3, 4))
+        );
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::Drag(MouseButton::Left))),
+            Some(PointerMsg::new(PointerKind::Drag, 3, 4))
+        );
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::ScrollDown)),
+            Some(PointerMsg::new(PointerKind::ScrollDown, 3, 4))
+        );
+
+        // Buttons the protocol does not carry, and a move with nothing pressed.
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::Down(MouseButton::Middle))),
+            None
+        );
+        assert_eq!(to_pointer_msg(mouse(MouseEventKind::Moved)), None);
+    }
+
+    #[test]
     fn colors_map_across() {
         assert_eq!(to_ct_color(Color::Reset), CtColor::Reset);
         assert_eq!(to_ct_color(Color::Indexed(7)), CtColor::AnsiValue(7));
@@ -545,19 +724,5 @@ mod tests {
             to_ct_color(Color::Rgb(1, 2, 3)),
             CtColor::Rgb { r: 1, g: 2, b: 3 }
         );
-    }
-
-    #[test]
-    fn the_server_defaults_to_a_sibling_binary() {
-        let explicit = PathBuf::from("/tmp/inkstone-server");
-        assert_eq!(resolve_server(Some(explicit.clone())).unwrap(), explicit);
-        // With no explicit path we either find a sibling or fall back to PATH;
-        // either way the name is what we asked for.
-        let resolved = resolve_server(None).unwrap();
-        assert!(resolved.ends_with(if cfg!(windows) {
-            "inkstone-server.exe"
-        } else {
-            "inkstone-server"
-        }));
     }
 }

@@ -15,6 +15,8 @@ name = "inkstone-server"
 path = "src/main.rs"
 
 [dependencies]
+inkstone-lsp.workspace = true
+serde_json.workspace = true
 inkstone-core.workspace = true
 inkstone-rpc.workspace = true
 crossbeam-channel.workspace = true

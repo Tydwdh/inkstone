@@ -8,6 +8,7 @@ description = "Editor core: buffer, modes, command registry, keymap, render mode
 
 [dependencies]
 inkstone-rpc.workspace = true
+regex.workspace = true
 ropey.workspace = true
 mlua.workspace = true
 unicode-segmentation.workspace = true

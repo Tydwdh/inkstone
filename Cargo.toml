@@ -4,6 +4,9 @@ members = [
     "crates/inkstone-core",
     "crates/inkstone-rpc",
     "crates/inkstone-server",
+    "crates/inkstone-client",
+    "crates/inkstone-lsp",
+    "crates/inkstone-gui",
     "crates/inkstone",
 ]
 
@@ -16,12 +19,16 @@ license = "MIT"
 [workspace.dependencies]
 inkstone-core = { path = "crates/inkstone-core" }
 inkstone-rpc = { path = "crates/inkstone-rpc" }
+inkstone-client = { path = "crates/inkstone-client" }
+inkstone-lsp = { path = "crates/inkstone-lsp" }
 
+regex = "1"
 crossterm = "0.29"
 ropey = "1.6"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 serde = { version = "1", features = ["derive"] }
 rmp-serde = "1.3"
+serde_json = "1"
 crossbeam-channel = "0.5"
 unicode-segmentation = "1"
 unicode-width = "0.2"

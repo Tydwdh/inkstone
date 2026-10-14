@@ -55,15 +55,22 @@ impl Viewport {
 ///
 /// `gutter` is the width of the line-number column: it eats into the columns
 /// available for text, so a viewport that ignored it would scroll too little
-/// and leave the cursor stranded past the right edge.
-pub fn ensure_cursor_visible(vp: &mut Viewport, cur: Cursor, gutter: u16) {
+/// and leave the cursor stranded past the right edge. `scrolloff` is the
+/// setting of the same name: lines of context to keep on either side.
+pub fn ensure_cursor_visible(vp: &mut Viewport, cur: Cursor, gutter: u16, scrolloff: usize) {
     // A degenerate viewport has no room to scroll into, so the cursor's own
     // position becomes the origin rather than an invented offset.
     let rows = vp.text_rows() as usize;
-    if rows == 0 || cur.row < vp.top_line {
-        vp.top_line = cur.row;
-    } else if cur.row >= vp.top_line + rows {
-        vp.top_line = cur.row + 1 - rows;
+    // `'scrolloff'`: the cursor keeps that many lines of context on either side,
+    // so the view scrolls early rather than letting it reach the edge. Vim caps
+    // it at half the window — more than that and there is no room left to move
+    // in — and the clamps below cap it again at the ends of the file, which is
+    // why this runs first.
+    let margin = scrolloff.min(rows.saturating_sub(1) / 2);
+    if rows == 0 || cur.row < vp.top_line + margin {
+        vp.top_line = cur.row.saturating_sub(margin);
+    } else if cur.row + margin >= vp.top_line + rows {
+        vp.top_line = (cur.row + margin + 1).saturating_sub(rows);
     }
 
     let columns = vp.width.saturating_sub(gutter) as usize;
@@ -76,8 +83,14 @@ pub fn ensure_cursor_visible(vp: &mut Viewport, cur: Cursor, gutter: u16) {
 
 /// Build a viewport from scratch that contains both `cur` and (optionally) the
 /// previous viewport, preferring the previous scroll position when possible.
-pub fn scroll_to_cursor(vp: &mut Viewport, cur: Cursor, buf: &Buffer, gutter: u16) {
-    ensure_cursor_visible(vp, cur, gutter);
+pub fn scroll_to_cursor(
+    vp: &mut Viewport,
+    cur: Cursor,
+    buf: &Buffer,
+    gutter: u16,
+    scrolloff: usize,
+) {
+    ensure_cursor_visible(vp, cur, gutter, scrolloff);
     // Never scroll past the end of the document if it fits.
     let lines = buf.line_count();
     let rows = vp.text_rows() as usize;
@@ -109,12 +122,12 @@ mod tests {
     fn ensure_visible_scrolls_down_minimally() {
         let mut vp = Viewport::new(80, 12); // 10 text rows
         vp.top_line = 0;
-        ensure_cursor_visible(&mut vp, Cursor::new(10, 0), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(10, 0), 0, 0);
         assert_eq!(vp.top_line, 1);
-        ensure_cursor_visible(&mut vp, Cursor::new(11, 0), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(11, 0), 0, 0);
         assert_eq!(vp.top_line, 2);
         // Already visible: no movement.
-        ensure_cursor_visible(&mut vp, Cursor::new(5, 0), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(5, 0), 0, 0);
         assert_eq!(vp.top_line, 2);
     }
 
@@ -122,7 +135,7 @@ mod tests {
     fn ensure_visible_scrolls_up() {
         let mut vp = Viewport::new(80, 12);
         vp.top_line = 8;
-        ensure_cursor_visible(&mut vp, Cursor::new(3, 0), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(3, 0), 0, 0);
         assert_eq!(vp.top_line, 3);
     }
 
@@ -130,22 +143,22 @@ mod tests {
     fn a_line_number_gutter_reduces_the_room_for_text() {
         let mut vp = Viewport::new(10, 12);
         // 2 columns go to the gutter, so column 8 is the last fully visible one.
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 7), 2);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 7), 2, 0);
         assert_eq!(vp.left_col, 0);
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 8), 2);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 8), 2, 0);
         assert_eq!(vp.left_col, 1);
     }
 
     #[test]
     fn a_degenerate_viewport_pins_the_cursor_to_the_visible_origin() {
         let mut vp = Viewport::new(0, 0);
-        ensure_cursor_visible(&mut vp, Cursor::new(7, 4), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(7, 4), 0, 0);
         assert_eq!((vp.top_line, vp.left_col), (7, 4));
 
         let buf = Buffer::from_text(&"x\n".repeat(10));
         let mut vp = Viewport::new(80, 0);
         vp.top_line = 3;
-        scroll_to_cursor(&mut vp, Cursor::new(3, 0), &buf, 0);
+        scroll_to_cursor(&mut vp, Cursor::new(3, 0), &buf, 0, 0);
         assert_eq!(
             vp.top_line, 3,
             "a zero-height viewport keeps the cursor line"
@@ -156,9 +169,9 @@ mod tests {
     fn ensure_visible_scrolls_right() {
         let mut vp = Viewport::new(10, 12);
         vp.top_line = 0;
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 9), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 9), 0, 0);
         assert_eq!(vp.left_col, 0, "column 9 is the last visible one");
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 10), 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 10), 0, 0);
         assert_eq!(vp.left_col, 1);
     }
 
@@ -167,12 +180,12 @@ mod tests {
         let buf = Buffer::from_text("a\nb\nc\n");
         let mut vp = Viewport::new(80, 12); // 10 text rows
         vp.top_line = 7;
-        scroll_to_cursor(&mut vp, Cursor::new(0, 0), &buf, 0);
+        scroll_to_cursor(&mut vp, Cursor::new(0, 0), &buf, 0, 0);
         assert_eq!(vp.top_line, 0, "3 lines fit, so the view starts at the top");
 
         let long = Buffer::from_text("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n");
         let mut vp = Viewport::new(80, 12);
-        scroll_to_cursor(&mut vp, Cursor::new(11, 0), &long, 0);
+        scroll_to_cursor(&mut vp, Cursor::new(11, 0), &long, 0, 0);
         assert_eq!(
             vp.top_line, 2,
             "12 lines in 10 rows: the last screen starts at 2"

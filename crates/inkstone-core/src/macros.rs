@@ -59,7 +59,11 @@ macro_rules! settings {
         }
 
         /// User-settable editor options, also reachable from Lua via `ed.set`.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        ///
+        /// `Clone` rather than `Copy`: a setting whose value is a list — `'path'`
+        /// — cannot be copied cheaply, and the one place that used to rely on the
+        /// copy clones instead.
+        #[derive(Debug, Clone, PartialEq, Eq)]
         pub struct Options {
             $(
                 $(#[$meta])*
@@ -90,7 +94,7 @@ macro_rules! settings {
             /// Read a setting.
             pub fn get(&self, setting: Setting) -> $crate::Param {
                 match setting {
-                    $( Setting::$variant => self.$field.into_param(), )*
+                    $( Setting::$variant => self.$field.clone().into_param(), )*
                 }
             }
         }

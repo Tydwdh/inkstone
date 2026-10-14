@@ -1,5 +1,9 @@
 //! Integration tests for the daemon: the in-process session seam, plus one
 //! end-to-end run against the real `inkstone-server` binary over its stdio pipes.
+//!
+//! Every test that looks at the screen folds the frames the way a frontend
+//! does — a full frame replaces the screen, a delta patches it — so the delta
+//! path is what these tests actually exercise.
 
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
@@ -10,7 +14,8 @@ use std::time::Duration;
 
 use inkstone_core::Editor;
 use inkstone_rpc::{
-    read_server_msg, write_client_msg, ClientMsg, Grid, KeyCode, KeyMsg, Param, ServerMsg,
+    read_server_msg, write_client_msg, ClientMsg, KeyCode, KeyMsg, Param, PointerKind, PointerMsg,
+    Screen, ServerMsg, ATTR_REVERSE,
 };
 use inkstone_server::{Response, Session};
 
@@ -36,24 +41,49 @@ fn type_str(s: &str) -> Vec<ClientMsg> {
     s.chars().map(typed).collect()
 }
 
-fn redraw(response: &Response) -> Option<&Grid> {
+/// Fold one frame into `screen`, the way a frontend does.
+fn fold_frame(frame: &ServerMsg, screen: &mut Screen) {
+    match frame {
+        ServerMsg::Redraw {
+            grid,
+            cursor,
+            cursor_visible,
+            insert,
+        } => {
+            screen.redraw(grid.clone(), *cursor, *cursor_visible, *insert);
+        }
+        ServerMsg::Rows {
+            updates,
+            cursor,
+            cursor_visible,
+            insert,
+        } => {
+            screen.rows(updates, *cursor, *cursor_visible, *insert);
+        }
+        // A clipboard frame is for the frontend, not for the screen.
+        ServerMsg::Clipboard(_) | ServerMsg::Quit => {}
+    }
+}
+
+/// The clipboard text a response carried, if any.
+fn clipboard(response: &Response) -> Option<String> {
     response.messages.iter().find_map(|msg| match msg {
-        ServerMsg::Redraw { grid, .. } => Some(grid),
+        ServerMsg::Clipboard(text) => Some(text.clone()),
         _ => None,
     })
 }
 
-fn last_redraw(session: &mut Session, msgs: Vec<ClientMsg>) -> Grid {
-    let mut latest = None;
-    for msg in msgs {
-        let response = session.handle(msg);
-        if let Some(grid) = redraw(&response) {
-            latest = Some(grid.clone());
-        }
+/// Fold everything a response carried into `screen`.
+fn fold(response: &Response, screen: &mut Screen) {
+    for msg in &response.messages {
+        fold_frame(msg, screen);
     }
-    match latest {
-        Some(grid) => grid,
-        None => panic!("no redraw was produced"),
+}
+
+/// Send these messages and fold the replies, the way a frontend does.
+fn feed(session: &mut Session, screen: &mut Screen, msgs: Vec<ClientMsg>) {
+    for msg in msgs {
+        fold(&session.handle(msg), screen);
     }
 }
 
@@ -61,11 +91,29 @@ fn session() -> Session {
     Session::new(Editor::new(None).expect("editor"))
 }
 
+/// What the daemon sends for one client message: a full frame or a delta.
+fn frames(session: &mut Session, msg: ClientMsg) -> Vec<ServerMsg> {
+    session.handle(msg).messages
+}
+
 #[test]
 fn resize_produces_a_frame_of_the_requested_size() {
     let mut session = session();
-    let response = session.handle(ClientMsg::Resize { cols: 40, rows: 6 });
-    let grid = redraw(&response).expect("a redraw");
+    let mut screen = Screen::new();
+    let messages = frames(&mut session, ClientMsg::Resize { cols: 40, rows: 6 });
+    assert!(
+        matches!(messages[..], [ServerMsg::Redraw { .. }]),
+        "a resize needs a whole screen: {messages:?}"
+    );
+    fold(
+        &Response {
+            messages,
+            quit: false,
+        },
+        &mut screen,
+    );
+
+    let grid = screen.grid();
     assert_eq!(grid.width, 40);
     assert_eq!(grid.height, 6);
     assert!(grid.row_text(0).trim_end().is_empty());
@@ -83,13 +131,20 @@ fn typing_and_saving_round_trips_through_the_daemon() {
     let _ = std::fs::remove_file(&path);
 
     let mut session = session();
+    let mut screen = Screen::new();
     // Wide enough that the `written` message is not truncated.
-    session.handle(ClientMsg::Resize { cols: 120, rows: 6 });
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 120, rows: 6 }],
+    );
 
     let mut keys = vec![typed('i')];
     keys.extend(type_str("hello"));
     keys.push(pressed(KeyCode::Esc));
-    let grid = last_redraw(&mut session, keys);
+    feed(&mut session, &mut screen, keys);
+
+    let grid = screen.grid();
     assert_eq!(grid.row_text(0).trim_end(), "hello");
     assert!(
         grid.row_text(4).contains("[+]"),
@@ -106,13 +161,276 @@ fn typing_and_saving_round_trips_through_the_daemon() {
         name: "save".into(),
         params: vec![Param::Str(path.to_string_lossy().into_owned())],
     });
-    let grid = redraw(&response).expect("a redraw");
+    fold(&response, &mut screen);
     assert!(
-        grid.row_text(5).contains("written"),
+        screen.grid().row_text(5).contains("written"),
         "message row: {:?}",
-        grid.row_text(5)
+        screen.grid().row_text(5)
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello\n");
+    assert!(!response.quit);
+}
+
+/// A keystroke that changes nothing but the cursor is a frame with no rows in
+/// it, and one that changes a line carries that line and nothing else.
+#[test]
+fn a_frame_carries_only_the_rows_that_changed() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 20, rows: 6 }],
+    );
+
+    let mut keys = vec![typed('i')];
+    keys.extend(type_str("ab"));
+    keys.push(pressed(KeyCode::Esc));
+    feed(&mut session, &mut screen, keys);
+
+    // Moving the cursor does not change the screen at 20 columns wide: the
+    // status line is truncated before it gets to the cursor position.
+    let messages = frames(&mut session, pressed(KeyCode::Left));
+    match &messages[..] {
+        [ServerMsg::Rows { updates, .. }] => assert!(
+            updates.is_empty(),
+            "moving the cursor changed {} rows",
+            updates.len()
+        ),
+        other => panic!("expected one delta frame, got {other:?}"),
+    }
+
+    // Typing `x` changes the row the cursor is on: `b`, then blanks.
+    let messages = frames(&mut session, typed('x'));
+    match &messages[..] {
+        [ServerMsg::Rows { updates, .. }] => {
+            assert_eq!(updates.len(), 1, "one row: {updates:?}");
+            assert_eq!(updates[0].y, 0);
+            assert_eq!(updates[0].runs[0].cell.text, "b", "the row after the edit");
+            assert_eq!(updates[0].runs[1].count, 19, "the rest of them blanks");
+        }
+        other => panic!("expected one delta frame, got {other:?}"),
+    }
+}
+
+/// Text that was never a key — a paste, or what an input method committed —
+/// lands at the cursor and takes one `u` to remove, whatever it spells.
+#[test]
+fn pasted_text_arrives_as_one_change() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 20, rows: 6 }, typed('i')],
+    );
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Text("dd\na\nb\n".to_string())],
+    );
+    assert_eq!(screen.grid().row_text(0).trim_end(), "dd");
+    assert_eq!(screen.grid().row_text(1).trim_end(), "a");
+    assert_eq!(screen.grid().row_text(2).trim_end(), "b");
+
+    feed(
+        &mut session,
+        &mut screen,
+        vec![pressed(KeyCode::Esc), typed('u')],
+    );
+    assert_eq!(
+        screen.grid().row_text(0).trim_end(),
+        "",
+        "one `u`, even though the paste spelled a command"
+    );
+}
+
+/// A click puts the cursor where it pointed, a drag selects, and a release
+/// without a drag is only a click.
+#[test]
+fn the_pointer_works_over_the_wire() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![
+            ClientMsg::Resize { cols: 20, rows: 8 },
+            typed('i'),
+            ClientMsg::Text("one\ntwo\nthree\n".to_string()),
+            pressed(KeyCode::Esc),
+            typed('g'),
+            typed('g'),
+        ],
+    );
+    assert_eq!(screen.grid().row_text(0).trim_end(), "one");
+
+    // A press at the start of the second row: the cursor goes there, and the
+    // selection it starts is visible as reverse video.
+    let messages = frames(
+        &mut session,
+        ClientMsg::Pointer(PointerMsg::new(PointerKind::Press, 0, 1)),
+    );
+    fold(
+        &Response {
+            messages,
+            quit: false,
+        },
+        &mut screen,
+    );
+    assert_eq!(screen.cursor(), (0, 1));
+    assert!(
+        screen.grid().get(0, 1).attrs & ATTR_REVERSE != 0,
+        "the character under the cursor is selected"
+    );
+
+    // Dragging to the last character of the line extends the selection over it.
+    let messages = frames(
+        &mut session,
+        ClientMsg::Pointer(PointerMsg::new(PointerKind::Drag, 2, 1)),
+    );
+    fold(
+        &Response {
+            messages,
+            quit: false,
+        },
+        &mut screen,
+    );
+    for x in 0..3 {
+        assert!(
+            screen.grid().get(x, 1).attrs & ATTR_REVERSE != 0,
+            "column {x} of the dragged row is selected"
+        );
+    }
+    assert_eq!(
+        screen.grid().get(3, 1).attrs & ATTR_REVERSE,
+        0,
+        "and nothing past it on that row"
+    );
+
+    // Copying takes the selection, and the frontend is told what it is.
+    let response = session.handle(ClientMsg::Copy);
+    assert_eq!(clipboard(&response), Some("two".to_string()));
+
+    // Releasing ends the drag, and the selection stays: it is the user's.
+    let messages = frames(
+        &mut session,
+        ClientMsg::Pointer(PointerMsg::new(PointerKind::Release, 2, 1)),
+    );
+    fold(
+        &Response {
+            messages,
+            quit: false,
+        },
+        &mut screen,
+    );
+    assert!(
+        screen
+            .grid()
+            .row_text(6)
+            .trim_end()
+            .starts_with("-- VISUAL --"),
+        "still selecting: {:?}",
+        screen.grid().row_text(6)
+    );
+
+    // A press and a release with nothing between them collapses to the cursor.
+    feed(
+        &mut session,
+        &mut screen,
+        vec![
+            ClientMsg::Pointer(PointerMsg::new(PointerKind::Press, 0, 2)),
+            ClientMsg::Pointer(PointerMsg::new(PointerKind::Release, 0, 2)),
+        ],
+    );
+    assert_eq!(screen.cursor(), (0, 2));
+    assert!(
+        screen.grid().get(0, 2).attrs & ATTR_REVERSE == 0,
+        "a click does not leave a selection behind"
+    );
+    assert!(
+        screen
+            .grid()
+            .row_text(6)
+            .trim_end()
+            .starts_with("-- NORMAL --"),
+        "and it is not visual mode any more: {:?}",
+        screen.grid().row_text(6)
+    );
+}
+
+/// The wheel moves the view, not the cursor.
+#[test]
+fn the_wheel_scrolls_without_moving_the_cursor() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    let mut text = String::new();
+    for line in 0..40 {
+        text.push_str(&format!("line {line}\n"));
+    }
+    feed(
+        &mut session,
+        &mut screen,
+        vec![
+            ClientMsg::Resize { cols: 20, rows: 6 },
+            typed('i'),
+            ClientMsg::Text(text),
+            pressed(KeyCode::Esc),
+            typed('g'),
+            typed('g'),
+        ],
+    );
+    assert_eq!(screen.grid().row_text(0).trim_end(), "line 0");
+
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Pointer(PointerMsg::new(
+            PointerKind::ScrollDown,
+            0,
+            0,
+        ))],
+    );
+    assert_eq!(
+        screen.grid().row_text(0).trim_end(),
+        "line 3",
+        "three lines"
+    );
+    assert_eq!(screen.cursor(), (0, 0), "the cursor did not move");
+
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Pointer(PointerMsg::new(
+            PointerKind::ScrollUp,
+            0,
+            0,
+        ))],
+    );
+    assert_eq!(screen.grid().row_text(0).trim_end(), "line 0");
+}
+
+/// Copying with nothing selected takes what the register holds.
+#[test]
+fn copying_without_a_selection_takes_the_register() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![
+            ClientMsg::Resize { cols: 20, rows: 6 },
+            typed('i'),
+            ClientMsg::Text("one\ntwo\n".to_string()),
+            pressed(KeyCode::Esc),
+            typed('g'),
+            typed('g'),
+        ],
+    );
+    feed(&mut session, &mut screen, vec![typed('y'), typed('y')]);
+
+    let response = session.handle(ClientMsg::Copy);
+    assert_eq!(clipboard(&response), Some("one\n".to_string()));
     assert!(!response.quit);
 }
 
@@ -147,76 +465,285 @@ fn shutdown_ends_the_session_without_a_frame() {
 #[test]
 fn navigation_keys_work_in_insert_mode_over_the_wire() {
     let mut session = session();
-    session.handle(ClientMsg::Resize { cols: 20, rows: 6 });
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 20, rows: 6 }],
+    );
 
     let mut keys = vec![typed('i')];
     keys.extend(type_str("ab"));
     keys.push(pressed(KeyCode::Enter));
     keys.extend(type_str("cd"));
-    let grid = last_redraw(&mut session, keys);
+    feed(&mut session, &mut screen, keys);
+    let grid = screen.grid();
     assert_eq!(grid.row_text(0).trim_end(), "ab");
     assert_eq!(grid.row_text(1).trim_end(), "cd");
 
     // Left then Up: the cursor walks to the start of the line above.
-    let mut keys = vec![pressed(KeyCode::Left), pressed(KeyCode::Up)];
-    keys.push(pressed(KeyCode::Home));
-    let grid = last_redraw(&mut session, keys);
-    assert_eq!(grid.row_text(0).trim_end(), "ab", "navigation never edits");
+    feed(
+        &mut session,
+        &mut screen,
+        vec![
+            pressed(KeyCode::Left),
+            pressed(KeyCode::Up),
+            pressed(KeyCode::Home),
+        ],
+    );
+    assert_eq!(
+        screen.grid().row_text(0).trim_end(),
+        "ab",
+        "navigation never edits"
+    );
 
     // `End` lands on `b`, `Left` steps back onto `a`, `Delete` eats it.
-    let grid = last_redraw(
+    feed(
         &mut session,
+        &mut screen,
         vec![
             pressed(KeyCode::End),
             pressed(KeyCode::Left),
             pressed(KeyCode::Delete),
         ],
     );
-    assert_eq!(grid.row_text(0).trim_end(), "b");
-    assert_eq!(grid.row_text(1).trim_end(), "cd");
-    match last_redraw_reply(&mut session, vec![pressed(KeyCode::Esc)]) {
-        ServerMsg::Redraw { cursor, grid, .. } => {
-            assert_eq!(
-                cursor,
-                (0, 0),
-                "the cursor is on screen: {:?}",
-                grid.row_text(0)
-            );
-        }
-        other => panic!("expected a redraw, got {other:?}"),
-    }
+    assert_eq!(screen.grid().row_text(0).trim_end(), "b");
+    assert_eq!(screen.grid().row_text(1).trim_end(), "cd");
+
+    feed(&mut session, &mut screen, vec![pressed(KeyCode::Esc)]);
+    assert_eq!(
+        screen.cursor(),
+        (0, 0),
+        "the cursor is on screen: {:?}",
+        screen.grid().row_text(0)
+    );
 }
 
-fn last_redraw_reply(session: &mut Session, msgs: Vec<ClientMsg>) -> ServerMsg {
-    let mut latest = None;
-    for msg in msgs {
-        let response = session.handle(msg);
-        if let Some(msg) = response
-            .messages
-            .into_iter()
-            .rev()
-            .find(|m| matches!(m, ServerMsg::Redraw { .. }))
-        {
-            latest = Some(msg);
-        }
-    }
-    latest.expect("no redraw was produced")
+/// Undo and redo arrive as keys and as named commands, and the screen they
+/// leave behind is the restored one — including the line the deletion took with
+/// it.
+#[test]
+fn undo_and_redo_over_the_wire() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 20, rows: 6 }],
+    );
+
+    let mut keys = vec![typed('i')];
+    keys.extend(type_str("ab"));
+    keys.push(pressed(KeyCode::Enter));
+    keys.extend(type_str("cd"));
+    keys.push(pressed(KeyCode::Esc));
+    feed(&mut session, &mut screen, keys);
+
+    // `Gdd`: delete the second line.
+    feed(
+        &mut session,
+        &mut screen,
+        vec![typed('G'), typed('d'), typed('d')],
+    );
+    assert_eq!(screen.grid().row_text(0).trim_end(), "ab");
+    assert_eq!(screen.grid().row_text(1).trim_end(), "");
+
+    feed(&mut session, &mut screen, vec![typed('u')]);
+    assert_eq!(
+        screen.grid().row_text(1).trim_end(),
+        "cd",
+        "`u` put the line back"
+    );
+    assert_eq!(screen.grid().row_text(2).trim_end(), "");
+
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Input(KeyMsg::ctrl('r'))],
+    );
+    assert_eq!(
+        screen.grid().row_text(1).trim_end(),
+        "",
+        "`<C-r>` replayed it"
+    );
+
+    // The same two by name, which is how a script reaches them.
+    let named = |name: &str| ClientMsg::Command {
+        name: name.to_string(),
+        params: Vec::new(),
+    };
+    feed(&mut session, &mut screen, vec![named("undo")]);
+    assert_eq!(screen.grid().row_text(1).trim_end(), "cd");
+    feed(&mut session, &mut screen, vec![named("redo")]);
+    assert_eq!(screen.grid().row_text(1).trim_end(), "");
 }
 
 #[test]
 fn a_resize_after_editing_keeps_the_text() {
     let mut session = session();
-    session.handle(ClientMsg::Resize { cols: 20, rows: 4 });
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 20, rows: 4 }],
+    );
     let mut keys = vec![typed('i')];
     keys.extend(type_str("abcdefghijklmnop"));
     keys.push(pressed(KeyCode::Esc));
-    last_redraw(&mut session, keys);
+    feed(&mut session, &mut screen, keys);
 
-    let response = session.handle(ClientMsg::Resize { cols: 60, rows: 8 });
-    let grid = redraw(&response).expect("a redraw");
+    // A resize makes the old screen the wrong shape to patch, so this is a
+    // whole frame again.
+    let messages = frames(&mut session, ClientMsg::Resize { cols: 60, rows: 8 });
+    assert!(
+        matches!(messages[..], [ServerMsg::Redraw { .. }]),
+        "a resize needs a whole screen: {messages:?}"
+    );
+    fold(
+        &Response {
+            messages,
+            quit: false,
+        },
+        &mut screen,
+    );
+
+    let grid = screen.grid();
     assert_eq!(grid.width, 60);
     assert_eq!(grid.height, 8);
     assert_eq!(grid.row_text(0).trim_end(), "abcdefghijklmnop");
+}
+
+/// The language-server path through the real binary: an init file that turns the
+/// setting on, a file that arrives over the wire *after* the daemon started, and
+/// a question that has to come back with the fixture's answer on the message row.
+///
+/// This is the path a frontend takes, and the one nothing else covers: the session
+/// is built before the file is opened, so a language server decided only at
+/// startup would never see a document.
+#[test]
+fn end_to_end_with_a_language_server() {
+    let fixture = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+        .and_then(|dir| dir.parent().map(|dir| dir.to_path_buf()))
+        .map(|dir| dir.join(format!("fake-lsp-server{}", std::env::consts::EXE_SUFFIX)));
+    let Some(fixture) = fixture.filter(|path| path.is_file()) else {
+        return;
+    };
+
+    let dir = temp_dir("lsp-e2e");
+    let init = dir.join("lsp-init.lua");
+    std::fs::write(&init, "ed.set(\"lsp\", true)\n").unwrap();
+    let path = dir.join("asked.rs");
+    std::fs::write(&path, "fn target_name() {}\n").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_inkstone-server"))
+        .arg("--init")
+        .arg(&init)
+        .env("INKSTONE_LSP", &fixture)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("failed to spawn inkstone-server");
+
+    let stdout = child.stdout.take().expect("piped stdout");
+    let (tx, rx) = mpsc::channel::<ServerMsg>();
+    let reader = thread::spawn(move || {
+        let mut input = BufReader::new(stdout);
+        while let Ok(Some(msg)) = read_server_msg(&mut input) {
+            if tx.send(msg).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let mut send = |msg: &ClientMsg| {
+        write_client_msg(&mut stdin, msg).expect("failed to write a frame");
+        stdin.flush().expect("failed to flush");
+    };
+    let mut screen = Screen::new();
+    // Drain whatever the daemon has sent, folding each frame into the screen the
+    // way a frontend does.
+    let drain = |rx: &mpsc::Receiver<ServerMsg>, screen: &mut Screen| {
+        while let Ok(msg) = rx.recv_timeout(Duration::from_millis(300)) {
+            fold_frame(&msg, screen);
+        }
+    };
+
+    drain(&rx, &mut screen);
+    send(&ClientMsg::Resize { cols: 60, rows: 8 });
+    drain(&rx, &mut screen);
+    // What the session said about the server it was asked to start: a failure to
+    // start one is a message, and the file-open message would cover it later.
+    let startup = {
+        let grid = screen.grid();
+        grid.row_text(grid.height - 1).trim().to_string()
+    };
+    assert!(
+        !startup.starts_with("lsp:"),
+        "the server did not start: {startup:?}"
+    );
+
+    // The file arrives the way a frontend opens it.
+    send(&ClientMsg::Command {
+        name: "edit_file".to_string(),
+        params: vec![Param::Str(path.to_string_lossy().to_string())],
+    });
+    drain(&rx, &mut screen);
+
+    // `K` asks the server what the word under the cursor is.
+    send(&typed('K'));
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    let mut said = String::new();
+    while std::time::Instant::now() < deadline {
+        drain(&rx, &mut screen);
+        let grid = screen.grid();
+        said = grid.row_text(grid.height - 1).trim().to_string();
+        if said.contains("fixture") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        said.contains("fixture"),
+        "the server's answer never reached the message row: {said:?}"
+    );
+
+    // The same question for the completion list: typing a word and asking for
+    // completions gets the server's items, each one resolved for its details.
+    for key in type_str("ofix") {
+        send(&key);
+    }
+    drain(&rx, &mut screen);
+    send(&ClientMsg::Input(KeyMsg::ctrl('n')));
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    let mut popup = String::new();
+    while std::time::Instant::now() < deadline {
+        drain(&rx, &mut screen);
+        let grid = screen.grid();
+        popup = (0..grid.height)
+            .map(|row| grid.row_text(row))
+            .collect::<Vec<String>>()
+            .join("\n");
+        if popup.contains("fixture_label") && popup.contains("the fixture's word for") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        popup.contains("fixture_label"),
+        "the server's items never reached the popup:\n{popup}"
+    );
+    assert!(
+        popup.contains("the fixture's word for fixture_"),
+        "the resolved detail never reached the popup:\n{popup}"
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
 }
 
 /// The real thing: spawn `inkstone-server`, talk to it over its pipes, then check
@@ -252,9 +779,11 @@ fn end_to_end_over_stdio() {
         stdin.flush().expect("failed to flush");
     };
 
-    // The daemon sends a frame as soon as it starts.
+    let mut screen = Screen::new();
+
+    // The daemon sends a whole screen as soon as it starts.
     let first = rx.recv_timeout(TIMEOUT).expect("no initial frame");
-    match first {
+    match &first {
         ServerMsg::Redraw {
             grid,
             cursor_visible,
@@ -266,13 +795,15 @@ fn end_to_end_over_stdio() {
         }
         other => panic!("expected a redraw, got {other:?}"),
     }
+    fold_frame(&first, &mut screen);
 
     send(&ClientMsg::Resize { cols: 40, rows: 6 });
     let frame = rx.recv_timeout(TIMEOUT).expect("no frame after resize");
-    match frame {
+    match &frame {
         ServerMsg::Redraw { grid, .. } => assert_eq!((grid.width, grid.height), (40, 6)),
         other => panic!("expected a redraw, got {other:?}"),
     }
+    fold_frame(&frame, &mut screen);
 
     // Type "hello" in insert mode, then leave normal mode.
     let mut keys = vec![ClientMsg::Input(KeyMsg::new(KeyCode::Char('i')))];
@@ -282,21 +813,30 @@ fn end_to_end_over_stdio() {
     keys.push(ClientMsg::Input(KeyMsg::new(KeyCode::Esc)));
 
     let mut seen_hello = false;
-    let mut last_grid = None;
     for msg in keys {
         send(&msg);
         let frame = rx.recv_timeout(TIMEOUT).expect("no frame for a key");
-        if let ServerMsg::Redraw { grid, .. } = frame {
-            seen_hello |= grid.row_text(0).trim_end() == "hello";
-            last_grid = Some(grid);
-        }
+        fold_frame(&frame, &mut screen);
+        seen_hello |= screen.grid().row_text(0).trim_end() == "hello";
     }
     assert!(seen_hello, "typing never showed up on screen");
-    let last_grid = last_grid.expect("a redraw");
     assert!(
-        last_grid.row_text(4).contains("NORMAL"),
+        screen.grid().row_text(4).contains("NORMAL"),
         "escape returned to normal mode: {:?}",
-        last_grid.row_text(4)
+        screen.grid().row_text(4)
+    );
+
+    // `dd` takes the line out and `u` puts it back, in the real process: if
+    // the history were wrong, the file would be written out empty.
+    for c in "ddu".chars() {
+        send(&ClientMsg::Input(KeyMsg::new(KeyCode::Char(c))));
+        let frame = rx.recv_timeout(TIMEOUT).expect("no frame for a key");
+        fold_frame(&frame, &mut screen);
+    }
+    assert_eq!(
+        screen.grid().row_text(0).trim_end(),
+        "hello",
+        "the line came back"
     );
 
     // Write it out, then close stdin: the daemon should notice EOF and exit.

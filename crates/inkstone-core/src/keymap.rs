@@ -72,17 +72,105 @@ impl Keymap {
             ("w", &["move_word_forward"]),
             ("b", &["move_word_backward"]),
             ("gg", &["goto_first_line"]),
+            ("K", &["hover"]),
+            ("gd", &["goto_definition"]),
+            ("gr", &["goto_references"]),
+            ("]d", &["next_diagnostic"]),
+            ("[d", &["previous_diagnostic"]),
+            ("gt", &["tab_next"]),
+            ("gT", &["tab_previous"]),
+            ("<C-w>w", &["window_next"]),
+            ("<C-w>h", &["window_left"]),
+            ("<C-w>j", &["window_down"]),
+            ("<C-w>k", &["window_up"]),
+            ("<C-w>l", &["window_right"]),
+            ("<C-w>s", &["split_rows"]),
+            ("<C-w>v", &["split_columns"]),
+            ("<C-w>c", &["window_close"]),
+            ("<C-w>=", &["equalize_windows"]),
+            ("<C-w>+", &["resize"]),
+            ("<C-w>-", &["resize_vertical"]),
+            ("<C-w>_", &["resize_vertical"]),
             ("G", &["goto_last_line"]),
+            ("gf", &["goto_file"]),
+            ("J", &["join"]),
+            ("gJ", &["join_tight"]),
+            ("q:", &["command_history"]),
+            ("q/", &["search_history"]),
+            ("<C-v>", &["visual_block"]),
+            ("H", &["goto_screen_top"]),
+            ("M", &["goto_screen_middle"]),
+            ("L", &["goto_screen_bottom"]),
+            ("<C-e>", &["scroll_line_down"]),
+            ("<C-y>", &["scroll_line_up"]),
+            ("<C-d>", &["half_page_down"]),
+            ("<C-u>", &["half_page_up"]),
+            ("<C-f>", &["page_down"]),
+            ("<C-b>", &["page_up"]),
             ("i", &["enter_insert"]),
             ("I", &["enter_insert_before"]),
             ("a", &["append"]),
             ("A", &["append_eol"]),
             ("o", &["open_line_below"]),
             ("O", &["open_line_above"]),
+            ("v", &["enter_visual"]),
+            ("V", &["enter_visual_line"]),
+            ("<CR>", &["open_place"]),
+            ("=", &["reindent_motion"]),
+            ("<GT>", &["indent_motion"]),
+            ("<LT>", &["outdent_motion"]),
+            ("gv", &["reselect"]),
+            ("gi", &["insert_again"]),
+            ("gq", &["format_motion"]),
+            ("g~", &["toggle_case_motion"]),
+            ("gu", &["lower_motion"]),
+            ("gU", &["upper_motion"]),
             ("x", &["delete_char"]),
+            ("d", &["delete_motion"]),
+            ("y", &["yank_motion"]),
+            ("c", &["change_motion"]),
+            ("p", &["put_after"]),
+            ("P", &["put_before"]),
+            ("<C-c>", &["copy"]),
             ("<Del>", &["delete_char"]),
-            ("dd", &["delete_line"]),
+            ("~", &["toggle_case"]),
+            ("%", &["match_bracket"]),
+            ("<C-a>", &["increment"]),
+            ("<C-x>", &["decrement"]),
+            ("g;", &["change_older"]),
+            ("g,", &["change_newer"]),
+            ("<C-o>", &["jump_oldest"]),
+            // A terminal cannot tell `<C-i>` from Tab: they are one byte, and
+            // crossterm hands it over as a Tab — which is what vim binds to the
+            // same thing in normal mode.
+            ("<C-i>", &["jump_newest"]),
+            ("<Tab>", &["jump_newest"]),
+            ("u", &["undo"]),
+            (".", &["repeat"]),
+            ("<C-r>", &["redo"]),
             (":", &["enter_command"]),
+            ("/", &["search_forward"]),
+            ("?", &["search_backward"]),
+            ("zf", &["fold_motion"]),
+            ("zo", &["fold_open"]),
+            ("zc", &["fold_close"]),
+            ("zR", &["fold_open_all"]),
+            ("zM", &["fold_close_all"]),
+            ("zd", &["fold_delete"]),
+            ("zm", &["fold_level_less"]),
+            ("zr", &["fold_level_more"]),
+            ("zx", &["fold_update"]),
+            ("zj", &["fold_next"]),
+            ("zk", &["fold_previous"]),
+            ("zt", &["scroll_to_top"]),
+            ("zz", &["scroll_to_center"]),
+            ("zb", &["scroll_to_bottom"]),
+            (";", &["find_repeat"]),
+            (",", &["find_reverse"]),
+            ("*", &["search_word_forward"]),
+            ("#", &["search_word_backward"]),
+            ("n", &["search_next"]),
+            ("N", &["search_previous"]),
             ("<Esc>", &["escape"]),
             ("<Left>", &["move_left"]),
             ("<Right>", &["move_right"]),
@@ -114,11 +202,59 @@ impl Keymap {
             ("<End>", &["move_line_end"]),
             ("<PageUp>", &["page_up"]),
             ("<PageDown>", &["page_down"]),
-            ("<Del>", &["delete_char"]),
+            // Insert mode's own delete: it must not take the register with it.
+            ("<Del>", &["delete_forwards"]),
+            ("<C-k>", &["signature_help"]),
+            ("<Tab>", &["snippet_next"]),
+            ("<S-Tab>", &["snippet_previous"]),
+            ("<C-n>", &["snippet_choice_next"]),
+            ("<C-p>", &["snippet_choice_previous"]),
+            ("<C-y>", &["complete_accept"]),
+            ("<C-e>", &["complete_cancel"]),
         ];
         for (lhs, commands) in insert {
             km.insert(
                 Mode::Insert,
+                lhs,
+                commands.iter().map(|c| c.to_string()).collect(),
+            )
+            .expect("built-in bindings are valid");
+        }
+
+        // Visual mode binds what acts on the selection, and nothing else: every
+        // key it does not bind falls through to the normal mode's motions, so
+        // `v` + `w` + `d` works without a second copy of the keymap. `V` is not
+        // here — it is bound in normal mode, which visual mode also reaches.
+        let visual: &[(&str, &[&str])] = &[
+            ("v", &["enter_visual"]),
+            ("J", &["join_visual"]),
+            ("gJ", &["join_tight_visual"]),
+            ("$", &["block_to_end"]),
+            ("I", &["insert_block_left"]),
+            ("A", &["insert_block_right"]),
+            ("<Esc>", &["escape_visual"]),
+            ("d", &["delete_visual"]),
+            ("x", &["delete_visual"]),
+            ("y", &["yank_visual"]),
+            ("c", &["change_visual"]),
+            ("o", &["swap_ends"]),
+            ("<C-c>", &["copy"]),
+            ("p", &["put_visual"]),
+            ("P", &["put_visual"]),
+            ("<gt>", &["indent_visual"]),
+            ("<lt>", &["outdent_visual"]),
+            ("=", &["reindent_visual"]),
+            ("u", &["lower_visual"]),
+            ("U", &["upper_visual"]),
+            ("~", &["toggle_case_visual"]),
+            // Vim's case operators take the selection too, spelled both ways.
+            ("gu", &["lower_visual"]),
+            ("gU", &["upper_visual"]),
+            ("g~", &["toggle_case_visual"]),
+        ];
+        for (lhs, commands) in visual {
+            km.insert(
+                Mode::Visual,
                 lhs,
                 commands.iter().map(|c| c.to_string()).collect(),
             )
@@ -130,7 +266,9 @@ impl Keymap {
     /// Bind `lhs` (a key sequence) in `mode`, replacing any existing binding.
     ///
     /// An empty command list removes the binding, which is what `ed.map(..., nil)`
-    /// means.
+    /// means. A sequence binds in any mode, insert mode included: the editor
+    /// holds the keys back until it knows whether they are a mapping, and types
+    /// them after all when they are not.
     ///
     /// Returns an error when `lhs` is not valid key notation.
     pub fn bind(
@@ -140,13 +278,6 @@ impl Keymap {
         commands: Vec<String>,
     ) -> Result<(), KeyParseError> {
         let keys = parse_key(lhs)?;
-        // Insert mode resolves one key at a time (typing must stay immediate),
-        // so a multi-key mapping there would silently never fire. Say so instead.
-        if mode == Mode::Insert && keys.len() > 1 {
-            return Err(KeyParseError(format!(
-                "insert-mode mappings must be a single key, got {lhs:?}"
-            )));
-        }
         let seq = encode_sequence(&keys);
         if commands.is_empty() {
             self.maps.remove(&(mode, seq));
@@ -194,6 +325,57 @@ impl Keymap {
 }
 
 /// Parse a key notation string into the keys it denotes.
+/// The keys a `:normal` argument stands for.
+///
+/// The notation everything else uses — `<Esc>`, `<CR>`, `<C-w>` — is read here
+/// too, because a person writing a `:` command has no way to type a control key.
+/// What is *not* read as notation is anything that is not one of those names: a
+/// `<` that does not open a known key, or a `>` with nothing before it, is the
+/// character it looks like. That is the difference between `:normal A <` (two
+/// characters) and `:normal A <Esc>` (a character and a key), and it is why this
+/// is not simply [`parse_key`], which fails on the first stray angle bracket.
+pub fn parse_normal_keys(argument: &str) -> Vec<KeyMsg> {
+    let mut keys = Vec::new();
+    let mut chars = argument.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '<' {
+            keys.push(KeyMsg::new(KeyCode::Char(c)));
+            continue;
+        }
+        // A `<` is notation only when a name and a `>` follow it within reason.
+        let mut token = String::new();
+        let mut rest = chars.clone();
+        let closed = loop {
+            match rest.next() {
+                Some('>') => break true,
+                Some(next) if token.len() < 12 => token.push(next),
+                Some(_) => break false,
+                None => break false,
+            }
+        };
+        match if closed {
+            parse_token(&token).ok()
+        } else {
+            None
+        } {
+            Some(key) => {
+                // Take the characters the token used, and the `>`.
+                for _ in 0..token.chars().count() + 1 {
+                    chars.next();
+                }
+                keys.push(key);
+            }
+            None => keys.push(KeyMsg::new(KeyCode::Char('<'))),
+        }
+    }
+    keys
+}
+
+/// A sequence of keys in the notation the keymap is written in: `gg`, `d i w`,
+/// `<Esc>`, `<C-w>v`. Every name in angle brackets is a key; anything else is one
+/// character per key. A name that is not one of them is an error here, which is
+/// what makes this the wrong reader for a `:` line — see
+/// [`parse_normal_keys`] for the one that takes a person's word for it.
 pub fn parse_key(s: &str) -> Result<Vec<KeyMsg>, KeyParseError> {
     let mut keys = Vec::new();
     let mut chars = s.chars().peekable();
@@ -458,6 +640,7 @@ mod tests {
             };
             let mode = match mode {
                 "n" => Mode::Normal,
+                "v" => Mode::Visual,
                 "i" => Mode::Insert,
                 // The header and the `| --- |` separator row.
                 "mode" => continue,
@@ -517,29 +700,39 @@ mod tests {
             km.lookup(Mode::Normal, "h"),
             Lookup::Exact(Binding::new(vec!["move_left".into()]))
         );
-        assert_eq!(km.lookup(Mode::Normal, "d"), Lookup::Prefix);
+        // `d` is a command of its own: it starts the delete operator and waits
+        // for a motion, and `dd` is that operator applied to itself.
         assert_eq!(
-            km.lookup(Mode::Normal, "d d"),
-            Lookup::Exact(Binding::new(vec!["delete_line".into()]))
+            km.lookup(Mode::Normal, "d"),
+            Lookup::Exact(Binding::new(vec!["delete_motion".into()]))
         );
+        assert_eq!(km.lookup(Mode::Normal, "d d"), Lookup::None);
         assert_eq!(km.lookup(Mode::Normal, "g"), Lookup::Prefix);
-        assert_eq!(km.lookup(Mode::Normal, "z"), Lookup::None);
+        // `q` is a prefix too: `q:` and `q/` are the history windows.
+        assert_eq!(km.lookup(Mode::Normal, "q"), Lookup::Prefix);
+        assert_eq!(
+            km.lookup(Mode::Normal, "q :"),
+            Lookup::Exact(Binding::new(vec!["command_history".into()]))
+        );
+        assert_eq!(km.lookup(Mode::Normal, "<Space>"), Lookup::None);
         assert_eq!(km.lookup(Mode::Insert, "h"), Lookup::None);
         assert_eq!(km.lookup(Mode::Normal, "d z"), Lookup::None);
     }
 
     #[test]
-    fn insert_mode_rejects_multi_key_mappings() {
-        // `ed.map("i", "jk", "<Esc>")` cannot work yet: it must not be accepted
-        // and then quietly ignored.
+    fn insert_mode_takes_sequences_like_any_other_mode() {
         let mut km = Keymap::with_defaults();
-        let err = km
-            .bind(Mode::Insert, "jk", vec!["escape".into()])
-            .unwrap_err();
-        assert!(err.to_string().contains("single key"), "{err}");
-        assert_eq!(km.lookup(Mode::Insert, "j"), Lookup::None);
-        // A single key is fine, and normal mode still takes sequences.
-        km.bind(Mode::Insert, "j", vec!["escape".into()]).unwrap();
+        km.bind(Mode::Insert, "jk", vec!["escape".into()]).unwrap();
+        assert_eq!(
+            km.lookup(Mode::Insert, "j"),
+            Lookup::Prefix,
+            "the first key of the sequence waits for the rest"
+        );
+        assert_eq!(
+            km.lookup(Mode::Insert, "j k"),
+            Lookup::Exact(Binding::new(vec!["escape".into()]))
+        );
+        assert_eq!(km.lookup(Mode::Insert, "x"), Lookup::None);
         km.bind(Mode::Normal, "jk", vec!["escape".into()]).unwrap();
     }
 

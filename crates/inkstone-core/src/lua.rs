@@ -219,9 +219,10 @@ impl LuaHost {
 fn parse_mode(mode: &str) -> mlua::Result<Mode> {
     match mode {
         "n" | "normal" => Ok(Mode::Normal),
+        "v" | "visual" => Ok(Mode::Visual),
         "i" | "insert" => Ok(Mode::Insert),
         other => Err(mlua::Error::RuntimeError(format!(
-            "ed.map: unknown mode {other:?} (expected \"n\" or \"i\")"
+            "ed.map: unknown mode {other:?} (expected \"n\", \"v\" or \"i\")"
         ))),
     }
 }
@@ -281,6 +282,17 @@ mod tests {
         let path = dir.join("init.lua");
         std::fs::write(&path, source).unwrap();
         Editor::new(Some(&path)).unwrap()
+    }
+
+    #[test]
+    fn init_can_remap_a_visual_mode_key() {
+        let mut ed = editor_with_init("remap-visual", r#"ed.map("v", "l", "yank_visual")"#);
+        ed.buffer = crate::buffer::Buffer::from_text("abc\n");
+        ed.cursor = Cursor::new(0, 0);
+        feed(&mut ed, "vl");
+        assert_eq!(ed.buffer.text(), "abc\n", "`l` yanks the selection now");
+        assert_eq!(ed.register.text(), "a");
+        assert_eq!(ed.mode, crate::mode::Mode::Normal);
     }
 
     #[test]
@@ -408,17 +420,23 @@ ed.set("tabstop", 8)
     }
 
     #[test]
-    fn an_insert_mapping_that_cannot_fire_is_rejected_at_load() {
-        let host_keymap = Rc::new(RefCell::new(Keymap::new()));
-        let host_options = Rc::new(RefCell::new(Options::default()));
-        let registry = CommandRegistry::with_builtins();
-        let host =
-            LuaHost::new(&registry, Rc::clone(&host_keymap), Rc::clone(&host_options)).unwrap();
+    fn insert_mappings_can_be_sequences() {
+        let mut ed = editor_with_init("insert-sequence", r#"ed.map("i", "jk", "escape")"#);
+        feed(&mut ed, "ijk");
+        assert_eq!(ed.buffer.text(), "\n", "`jk` typed nothing");
+        assert_eq!(ed.mode, crate::mode::Mode::Normal, "and left insert mode");
+    }
 
-        let err = host
-            .load_str("test", r#"ed.map("i", "jk", "escape")"#)
-            .unwrap_err();
-        assert!(err.to_string().contains("single key"), "{err}");
+    #[test]
+    fn an_insert_sequence_that_is_not_a_mapping_is_typed_after_all() {
+        let mut ed = editor_with_init("insert-flush", r#"ed.map("i", "jk", "escape")"#);
+        feed(&mut ed, "ijx");
+        assert_eq!(
+            ed.buffer.text(),
+            "jx\n",
+            "the held-back `j` is typed when `x` proves the sequence is not a mapping"
+        );
+        assert_eq!(ed.mode, crate::mode::Mode::Insert);
     }
 
     #[test]
@@ -435,7 +453,7 @@ ed.set("tabstop", 8)
         assert!(err.to_string().contains("bad key notation"), "{err}");
 
         let err = host
-            .load_str("test", r#"ed.map("visual", "x", "move_left")"#)
+            .load_str("test", r#"ed.map("wibble", "x", "move_left")"#)
             .unwrap_err();
         assert!(err.to_string().contains("unknown mode"), "{err}");
     }

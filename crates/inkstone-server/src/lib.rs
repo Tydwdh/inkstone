@@ -644,6 +644,14 @@ impl Session {
     /// Diagnostics go to the document they are about, not to the one being
     /// looked at.
     pub fn pump_lsp(&mut self) {
+        self.apply_resolved();
+        self.apply_asking();
+        self.collect_diagnostics();
+    }
+
+    /// The answer to a `completionItem/resolve`, which is an item's details: they
+    /// go where the popup shows them.
+    fn apply_resolved(&mut self) {
         // An item resolved: its details go where the popup shows them.
         let resolving = self
             .lsp
@@ -686,7 +694,10 @@ impl Session {
                 }
             }
         }
+    }
 
+    /// The answer to whatever request was out, if it has arrived.
+    fn apply_asking(&mut self) {
         // The answer to whatever was asked, if one is out and has arrived.
         let asking = self.lsp.as_ref().and_then(|server| server.asking.clone());
         if let Some((id, ask)) = asking {
@@ -699,84 +710,22 @@ impl Session {
                     server.asking = None;
                 }
                 match ask {
-                    Ask::Completion { .. } => {
-                        // What was sent is kept as well as what it means: the
-                        // details of one item are a question about *it*.
-                        if let Some(server) = self.lsp.as_mut() {
-                            server.raw_completions = answer
-                                .get("items")
-                                .and_then(Value::as_array)
-                                .or_else(|| answer.as_array())
-                                .cloned()
-                                .unwrap_or_default();
-                        }
-                        let items = completion_items_from(&answer);
-                        if !items.is_empty() {
-                            self.editor.set_completions(items);
-                        }
-                    }
+                    Ask::Completion { .. } => self.completion_answer(&answer),
                     Ask::Hover { .. } => self.editor.message = hover_text_from(&answer),
                     Ask::Definition { .. } => self.goto_definition_from(&answer),
                     Ask::Signature { .. } => self.editor.message = signature_text(&answer),
-                    Ask::Format { save, .. } => {
-                        let edits = edits_from(&answer, &self.editor.buffer);
-                        let count = self.editor.apply_edits(&edits);
-                        self.editor.message = if count == 0 {
-                            "already formatted".to_string()
-                        } else {
-                            format!("{count} edit{} applied", if count == 1 { "" } else { "s" })
-                        };
-                        // `formatonsave`: the answer is what goes to disk. The
-                        // write that asked for it happened already, so a server
-                        // that says nothing costs a person nothing — and this one
-                        // writes again, which is what makes the file and the
-                        // buffer agree.
-                        if save {
-                            match self.editor.write_buffer(None) {
-                                Ok(path) => {
-                                    self.editor.message = format!("\"{}\" written", path.display())
-                                }
-                                Err(error) => self.editor.message = error.to_string(),
-                            }
-                        }
-                    }
-                    Ask::WorkspaceSymbols { .. } => {
-                        // A workspace answer is a list of places in *other*
-                        // files, so the list is the answer: it is filled, and the
-                        // window that shows it is opened, the way a search that
-                        // spans a project wants to be read rather than jumped
-                        // into.
-                        let places = places_from(&answer);
-                        let count = places.len();
-                        self.editor.set_places(places);
-                        self.editor.message =
-                            format!("{count} symbol{}", if count == 1 { "" } else { "s" });
-                        if count > 0 {
-                            self.editor.open_places_list();
-                            self.editor.message =
-                                format!("{count} symbol{}", if count == 1 { "" } else { "s" });
-                        }
-                    }
-                    Ask::Symbols { .. } => {
-                        self.editor.set_places(places_from(&answer));
-                        // The answer names places like any other; the first is
-                        // where a person meant to go.
-                        self.editor.message = symbols_text(&answer);
-                        goto_first_reference(&mut self.editor, &answer);
-                    }
-                    Ask::References { .. } => {
-                        // The list is kept as a list as well as said once: `gr`
-                        // says where the places are, and `:cnext` walks them,
-                        // which is what a list with more than a screenful of
-                        // entries needs.
-                        self.editor.set_places(places_from(&answer));
-                        self.editor.message = references_text(&answer);
-                        goto_first_reference(&mut self.editor, &answer);
-                    }
+                    Ask::Format { save, .. } => self.format_answer(&answer, save),
+                    Ask::WorkspaceSymbols { .. } => self.workspace_symbols_answer(&answer),
+                    Ask::Symbols { .. } => self.symbols_answer(&answer),
+                    Ask::References { .. } => self.references_answer(&answer),
                 }
             }
         }
+    }
 
+    /// Take in what the server has published: the diagnostics for the file that is
+    /// open, and for any other document this session holds.
+    fn collect_diagnostics(&mut self) {
         let Some(server) = self.lsp.as_mut() else {
             return;
         };
@@ -822,6 +771,130 @@ impl Session {
         }
     }
 
+    /// What a completion answer does: keep what was sent, and show what it means.
+    ///
+    /// What was sent is kept as well as what it means, because the details of one
+    /// item are a question about *it*: `completionItem/resolve` asks the server
+    /// about the item it sent, `data` and all.
+    fn completion_answer(&mut self, answer: &Value) {
+        if let Some(server) = self.lsp.as_mut() {
+            server.raw_completions = answer
+                .get("items")
+                .and_then(Value::as_array)
+                .or_else(|| answer.as_array())
+                .cloned()
+                .unwrap_or_default();
+        }
+        let items = completion_items_from(answer);
+        if !items.is_empty() {
+            self.editor.set_completions(items);
+        }
+    }
+
+    /// What a formatting answer does: the edits, and — for `formatonsave` — the
+    /// write that asked for them.
+    ///
+    /// The write that asked happened already, so a server that says nothing costs
+    /// a person nothing; this writes *again*, which is what makes the file and the
+    /// buffer agree.
+    fn format_answer(&mut self, answer: &Value, save: bool) {
+        let edits = edits_from(answer, &self.editor.buffer);
+        let count = self.editor.apply_edits(&edits);
+        self.editor.message = if count == 0 {
+            "already formatted".to_string()
+        } else {
+            format!("{count} edit{} applied", if count == 1 { "" } else { "s" })
+        };
+        if save {
+            match self.editor.write_buffer(None) {
+                Ok(path) => self.editor.message = format!("\"{}\" written", path.display()),
+                Err(error) => self.editor.message = error.to_string(),
+            }
+        }
+    }
+
+    /// What a workspace-symbols answer does: a list of places in *other* files, so
+    /// the list is the answer and the window that shows it is opened.
+    fn workspace_symbols_answer(&mut self, answer: &Value) {
+        let places = places_from(answer);
+        let count = places.len();
+        self.editor.set_places(places);
+        if count > 0 {
+            self.editor.open_places_list();
+        }
+        self.editor.message = format!("{count} symbol{}", if count == 1 { "" } else { "s" });
+    }
+
+    /// What a symbols answer does: the places it names, and the first one.
+    fn symbols_answer(&mut self, answer: &Value) {
+        self.editor.set_places(places_from(answer));
+        // The answer names places like any other; the first is where a person
+        // meant to go.
+        self.editor.message = symbols_text(answer);
+        goto_first_reference(&mut self.editor, answer);
+    }
+
+    /// What a references answer does: the list is kept as a list as well as said
+    /// once — `gr` says where the places are, and `:cnext` walks them.
+    fn references_answer(&mut self, answer: &Value) {
+        self.editor.set_places(places_from(answer));
+        self.editor.message = references_text(answer);
+        goto_first_reference(&mut self.editor, answer);
+    }
+
+    /// Ask about formatting: the file, or the range a `:{range}format` named.
+    ///
+    /// No position and no options a server would understand: what is asked for
+    /// is the whole document laid out, or part of it — `textDocument/rangeFormatting`
+    /// is the same answer about part of the file.
+    fn ask_format(&mut self, ask: &Ask, uri: &str) {
+        let Ask::Format { from, to, .. } = ask else {
+            return;
+        };
+
+        let options = serde_json::json!({
+            "tabSize": self.editor.options.borrow().tabstop,
+            "insertSpaces": false
+        });
+        // A range makes it `rangeFormatting`, which is the same answer about
+        // part of the file; no range is the whole document.
+        let (method, params) = match (from, to) {
+            (Some(from), Some(to)) => {
+                let last = self.editor.buffer.line_count().saturating_sub(1);
+                let (from, to) = ((*from).min(last), (*to).min(last));
+                let start_line = self.editor.buffer.line_string(from);
+                let end_line = self.editor.buffer.line_string(to);
+                let range = serde_json::json!({
+                    "start": { "line": from, "character": 0 },
+                    "end": { "line": to, "character": end_line.chars().count() }
+                });
+                let _ = start_line;
+                (
+                    "textDocument/rangeFormatting",
+                    serde_json::json!({
+                        "textDocument": { "uri": uri },
+                        "range": range,
+                        "options": options
+                    }),
+                )
+            }
+            _ => (
+                "textDocument/formatting",
+                serde_json::json!({
+                    "textDocument": { "uri": uri },
+                    "options": options
+                }),
+            ),
+        };
+        let Some(server) = self.lsp.as_mut() else {
+            return;
+        };
+        match server.client.request(method, params) {
+            Ok(id) => server.asking = Some((id, ask.clone())),
+            Err(error) => self.editor.message = format!("lsp: {error}"),
+        }
+    }
+
     /// What each request is called, and what its answer means.
     fn ask_lsp(&mut self) {
         let Some(ask) = self.editor.take_lsp_ask() else {
@@ -845,48 +918,9 @@ impl Session {
             // the next keystroke will have something to ask about.
             return;
         }
-        // Formatting is asked about the file and nothing else: no position, and
-        // no options, since there is nowhere yet to put an option like "insert
-        // spaces" that a server would understand.
-        if let Ask::Format { from, to, .. } = &ask {
-            let options = serde_json::json!({
-                "tabSize": self.editor.options.borrow().tabstop,
-                "insertSpaces": false
-            });
-            // A range makes it `rangeFormatting`, which is the same answer about
-            // part of the file; no range is the whole document.
-            let (method, params) = match (from, to) {
-                (Some(from), Some(to)) => {
-                    let last = self.editor.buffer.line_count().saturating_sub(1);
-                    let (from, to) = ((*from).min(last), (*to).min(last));
-                    let start_line = self.editor.buffer.line_string(from);
-                    let end_line = self.editor.buffer.line_string(to);
-                    let range = serde_json::json!({
-                        "start": { "line": from, "character": 0 },
-                        "end": { "line": to, "character": end_line.chars().count() }
-                    });
-                    let _ = start_line;
-                    (
-                        "textDocument/rangeFormatting",
-                        serde_json::json!({
-                            "textDocument": { "uri": uri },
-                            "range": range,
-                            "options": options
-                        }),
-                    )
-                }
-                _ => (
-                    "textDocument/formatting",
-                    serde_json::json!({
-                        "textDocument": { "uri": uri },
-                        "options": options
-                    }),
-                ),
-            };
-            return match server.client.request(method, params) {
-                Ok(id) => server.asking = Some((id, ask)),
-                Err(error) => self.editor.message = format!("lsp: {error}"),
-            };
+        if matches!(ask, Ask::Format { .. }) {
+            self.ask_format(&ask, &uri);
+            return;
         }
         // `workspace/symbol` is asked about a *name* rather than a place: the
         // word under the cursor is the query, and a cursor that is not on a word

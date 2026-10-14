@@ -635,3 +635,36 @@ fn a_path_a_person_types_is_expanded() {
         "and so is a variable that is not set"
     );
 }
+
+#[test]
+fn visual_gf_uses_the_selection_as_the_name() {
+    // "{Visual}[count]gf: same as "gf", but the highlighted text is used as the
+    // name of the file to edit. 'isfname' is ignored. Leading blanks are skipped,
+    // otherwise all blanks and special characters are included in the file name."
+    let dir = std::env::temp_dir().join("inkstone-visual-gf");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a name with spaces.txt"), "spaces\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    ed.execute_cmdline(&format!("set path={}", dir.display()));
+    // A name with a space in it: the cursor's `isfname` rules would stop at the
+    // space, and the selection does not care.
+    ed.buffer = Buffer::from_text("see  a name with spaces.txt  here\n");
+    ed.cursor = Cursor::new(0, 5);
+    feed(&mut ed, "v");
+    // Exactly the name: 22 characters, so 21 to the right. The manual trims
+    // *leading* blanks only, so a trailing blank would be part of the name.
+    feed(&mut ed, "21l");
+    feed(&mut ed, "gf");
+    assert_eq!(ed.mode, Mode::Normal, "the selection is done with");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("a name with spaces.txt")),
+        "opened by the selection: {:?} (message {:?})",
+        ed.buffer.path(),
+        ed.message
+    );
+    assert_eq!(ed.buffer.text(), "spaces\n");
+}

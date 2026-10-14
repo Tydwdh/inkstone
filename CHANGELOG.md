@@ -26,6 +26,10 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `{Visual}gf`: the highlighted text is the name of the file to open — "same as
+  "gf", but the highlighted text is used as the name of the file to edit. 'isfname'
+  is ignored" — which is the only way to open a name with a space in it, since the
+  cursor's rules stop at the space.
 - A file name a person types is expanded the way vim expands one: `~` at the front
   is the home directory and `$VAR`/`${VAR}` is the variable's value, wherever the
   name is typed — `:e`, `:w`, `:r`, `gf`. `~user` is left as written, since looking

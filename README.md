@@ -120,6 +120,7 @@ notation;
 | n | `G` | `goto_last_line` |
 | n | `g f` | `goto_file` |
 | n | `g F` | `goto_file_line` |
+| v | `g f` | `goto_file_visual` |
 | n | `J` | `join` |
 | n | `z f` | `fold_motion` |
 | n | `z o` | `fold_open` |
@@ -424,6 +425,10 @@ A name typed anywhere — `:e`, `:w`, `:r`, `gf` — has `~` expanded to the hom
 directory and `$VAR`/`${VAR}` to the variable's value, which is vim's rule for a
 file name. `~user` is left as written: looking a user up needs the password
 database, which the standard library does not offer.
+
+`{Visual}gf` opens the file whose name is the *selection*, which is how a name with
+a space in it is opened at all: `'isfname'` is ignored there, and only leading
+blanks are skipped, so what is highlighted is the name.
 
 `gf` opens the file whose name is under the cursor — read as a *file name* rather
 than as a word, so `src/main.rs` is one name and not three. It is looked for beside

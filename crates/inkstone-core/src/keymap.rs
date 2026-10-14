@@ -251,6 +251,7 @@ impl Keymap {
             ("<lt>", &["outdent_visual"]),
             ("=", &["reindent_visual"]),
             ("u", &["lower_visual"]),
+            ("gf", &["goto_file_visual"]),
             ("U", &["upper_visual"]),
             ("~", &["toggle_case_visual"]),
             // Vim's case operators take the selection too, spelled both ways.

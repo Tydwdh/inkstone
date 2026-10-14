@@ -96,6 +96,7 @@ impl CommandRegistry {
         join_tight_visual,
         goto_file,
         goto_file_line,
+        goto_file_visual,
         command_history,
         search_history,
         block_to_end,
@@ -3917,6 +3918,39 @@ fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Resul
         editor.message = "E484: No file name under the cursor".to_string();
         return Ok(());
     };
+    open_named(editor, &name, count, line)
+}
+
+/// `{Visual}gf` — the same, with the *selected* text as the name.
+///
+/// "Same as "gf", but the highlighted text is used as the name of the file to
+/// edit. 'isfname' is ignored. Leading blanks are skipped, otherwise all blanks
+/// and special characters are included in the file name" — which is what makes it
+/// useful: a name with a space in it is a name, and the cursor's `isfname` rules
+/// would stop at the space.
+fn goto_file_visual(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let Some((start, end)) = editor.visual_span() else {
+        editor.message = "E484: No file name under the cursor".to_string();
+        return Ok(());
+    };
+    let text = editor.buffer.slice_text(start, end);
+    let name = text.trim_start().to_string();
+    let name = name.trim_end_matches(['\n', '\r']).to_string();
+    if name.is_empty() {
+        editor.message = "E484: No file name under the cursor".to_string();
+        return Ok(());
+    }
+    // The selection goes: what was picked was a name, and the window that opens
+    // is the file.
+    editor.selection = None;
+    editor.mode = Mode::Normal;
+    editor.clear_pending();
+    open_named(editor, &name, count(params), None)
+}
+
+/// Open the file `name` names, the count'th the search finds, at `line` if one
+/// was given.
+fn open_named(editor: &mut Editor, name: &str, count: usize, line: Option<usize>) -> Result<()> {
     // Relative to the file that is open first, which is what a name in a file
     // means: a name beside it. Then `'path'`, in the order it is written — which is
     // what the setting is for, and how a name in an `import` line finds its way to
@@ -3924,8 +3958,8 @@ fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Resul
     // name stands on its own before the search.
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     match editor.buffer.path().and_then(Path::parent) {
-        Some(dir) => candidates.push(dir.join(&name)),
-        None => candidates.push(std::path::PathBuf::from(&name)),
+        Some(dir) => candidates.push(dir.join(name)),
+        None => candidates.push(std::path::PathBuf::from(name)),
     }
     // Then `'path'`, in the order it is written. An entry may hold a wildcard —
     // `*` for a run of characters within a name, and a component that is `**`
@@ -3943,7 +3977,7 @@ fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Resul
         .map(str::to_string)
         .collect();
     for dir in entries.iter() {
-        candidates.extend(path_candidates(dir, &name));
+        candidates.extend(path_candidates(dir, name));
     }
     // `'suffixesadd'`: "used when searching for a file for the "gf" … commands …
     // to check for file names with a suffix added". The plain name is looked for
@@ -3955,6 +3989,7 @@ fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Resul
             candidates.extend(path_candidates(dir, &format!("{name}{suffix}")));
         }
     }
+    let name = name.to_string();
     let Some(path) = candidates
         .into_iter()
         .filter(|path| path.is_file())

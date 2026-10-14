@@ -3146,6 +3146,24 @@ wherever a name is typed, not only in `gf`.
 - **Left for later:** `~user`, `%` and `#` for the current and alternate file, and
   `'includeexpr'`.
 
+## Done — `{Visual}gf`
+
+The last of `gf`'s lookups: the name is not under the cursor but *selected*.
+
+- **What shipped:** `{Visual}gf` — "same as "gf", but the highlighted text is used
+  as the name of the file to edit. 'isfname' is ignored. Leading blanks are
+  skipped, otherwise all blanks and special characters are included in the file
+  name" — and that last sentence is the point: a name with a space in it can only
+  be opened this way, because the cursor's rules stop at the space. It shares the
+  lookup with `gf` through `open_named`.
+- **What the smoke could not do:** feeding a count, a motion and a two-key binding
+  in one write left the selection live but never fired the command, so the terminal
+  could not confirm this one. The unit test is the evidence, and the smoke is
+  written down as inconclusive rather than as a pass.
+- **Files:** `inkstone-core` (`goto_file_visual`, `open_named` factored out of
+  `goto_file_at`, the visual-mode binding and its README row).
+- **Left for later:** `'includeexpr'`, `~user`, and `%`/`#` in a name.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

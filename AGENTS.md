@@ -39,8 +39,10 @@ built, because the frontend looks for the daemon next to its own executable —
 
 ## What is not tested, and how to check it
 
-The kernel, the protocol and the daemon are covered by 539 tests, including one
-that drives the real daemon binary over pipes and inspects the bytes it writes.
+The workspace is covered by 539 tests, including one that drives the real
+daemon binary over pipes and inspects the bytes it writes. The kernel, the
+protocol and the daemon are 468 of them; the rest belong to the frontends, the
+client and the LSP crate.
 **A frontend's drawing is not covered by CI and cannot be**: raw mode needs a
 real terminal, and a window needs a real window. Both the window's metrics and
 the terminal frontend's key translation are unit tested; what the pixels or the

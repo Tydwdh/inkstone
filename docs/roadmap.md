@@ -2853,6 +2853,33 @@ spellings.
 - **Left for later:** `:set {name}?` in a *window*, `ed.set` writing the global
   value, and vim's `:setlocal!` (which makes the local value the default).
 
+## Done — `'path'` wildcards
+
+`gf` can look for a name under the file's own directory, which is what
+`:set path=**` is for.
+
+- **What shipped:** vim's `file-searching` wildcards in a `'path'` entry — `*`
+  for a run of characters within one name, `?` and `[...]` with it, and a
+  component that is exactly `**` (or `**N`, 0..100, thirty by default) for "this
+  directory and everything under it". The name itself is matched literally,
+  because `'isfname'` has no `*` in it: the pattern belongs to the setting, not
+  to the text.
+- **Constraints it had to respect, and how:** an entry with no wildcard in it
+  takes the old fast path, so nothing that worked before walks a tree. The walk
+  starts at the first component that *has* a wildcard, and everything before it
+  is a plain directory — built the way a path is, because pushing `C:` and then
+  `\` one at a time leaves a drive-relative path and the drive is lost.
+- **What the probe found:** the first version returned the matches as a value,
+  and the walk calls the matcher once per directory it reaches — so every result
+  was dropped on the floor by a caller that did not look at it. The matcher
+  pushes into a vector now, which is the shape a walk wants.
+- **Files:** `inkstone-core` (`path_candidates`, `match_directories`, `walk_down`,
+  `starstar_depth`, `names_in`, `glob_matches`, `path_head`, and `goto_file`'s
+  candidate list).
+- **Left for later:** the upward form, `dir;/stop`, and the combined
+  `**;stop` — the manual's other two kinds of file searching — and `'path'` for
+  `:find`, which this editor does not have.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

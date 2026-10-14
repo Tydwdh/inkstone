@@ -26,6 +26,11 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `'path'` entries can hold vim's file-searching wildcards: `*` for a run of
+  characters within one name, and a component that is exactly `**` for that
+  directory and everything under it (thirty levels, or as many as `**5` says).
+  `:set path=**` is what makes `gf` find a name anywhere under the file that is
+  open. The upward `dir;/stop` form is not implemented.
 - The rest of `:setlocal`/`:setglobal`: with no argument they name the values
   that scope is holding (vim's "all local options which are different from the
   default"), and `:setlocal {name}?` answers `--{name}={value}` when the file has

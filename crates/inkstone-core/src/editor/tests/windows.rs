@@ -371,3 +371,53 @@ fn listing_and_naming_documents() {
     ed.execute_cmdline("b");
     assert_eq!(ed.message, "E471: Argument required");
 }
+
+#[test]
+fn a_path_entry_can_hold_a_wildcard() {
+    let dir = std::env::temp_dir().join("inkstone-path");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src/deep/inside")).unwrap();
+    std::fs::create_dir_all(dir.join("other")).unwrap();
+    std::fs::write(dir.join("top.rs"), "top\n").unwrap();
+    std::fs::write(dir.join("src/one.rs"), "one\n").unwrap();
+    std::fs::write(dir.join("src/deep/two.rs"), "two\n").unwrap();
+    std::fs::write(dir.join("other/three.rs"), "three\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    // A buffer with no file of its own: every candidate comes from `'path'`.
+    ed.buffer = Buffer::from_text("one.rs\n");
+    ed.cursor = Cursor::new(0, 0);
+
+    // `*` is a run of characters within one name.
+    ed.execute_cmdline(&format!("set path={}", dir.join("src").display()));
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("one.rs")),
+        "found in the plain entry: {:?}",
+        ed.buffer.path()
+    );
+
+    // `**` is this directory and everything under it, which is how a name in an
+    // `import` line finds a file in a tree.
+    ed.buffer = Buffer::from_text("two.rs\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!("set path={}/**", dir.display()));
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("two.rs")),
+        "found two levels down: {:?}",
+        ed.buffer.path()
+    );
+
+    // `**1` is one level, so the file two levels down is out of reach — and the
+    // message says so rather than opening the wrong thing.
+    ed.buffer = Buffer::from_text("two.rs\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!("set path={}/**1", dir.display()));
+    feed(&mut ed, "gf");
+    assert_eq!(ed.message, "E484: Can't open file two.rs");
+}

@@ -3739,8 +3739,14 @@ fn goto_file(editor: &mut Editor, _params: &[Param]) -> Result<()> {
         Some(dir) => candidates.push(dir.join(&name)),
         None => candidates.push(std::path::PathBuf::from(&name)),
     }
-    for dir in editor.options.borrow().path.0.iter() {
-        candidates.push(dir.join(&name));
+    // Then `'path'`, in the order it is written. An entry may hold a wildcard —
+    // `*` for a run of characters within a name, and a component that is `**`
+    // for "this directory and everything under it", which is vim's
+    // `file-searching`. The name itself is taken literally, because `isfname`
+    // has no `*` in it: the pattern is the directory's, not the file's.
+    let entries = editor.options.borrow().path.0.clone();
+    for dir in entries.iter() {
+        candidates.extend(path_candidates(dir, &name));
     }
     let Some(path) = candidates.into_iter().find(|path| path.is_file()) else {
         editor.message = format!("E484: Can't open file {name}");
@@ -3758,6 +3764,197 @@ fn goto_file(editor: &mut Editor, _params: &[Param]) -> Result<()> {
         Err(_) => editor.message = format!("E484: Can't open file {name}"),
     }
     Ok(())
+}
+
+/// The files a `'path'` entry names for `name`.
+///
+/// A plain entry is one candidate, as it always was. An entry with a wildcard in
+/// it is a pattern, and the candidates are what it matches: `*` is a run of
+/// characters within one name, and a component that is exactly `**` is "this
+/// directory, and every directory under it" — up to vim's thirty levels, or as
+/// many as `**N` says. Only the downward half of `file-searching` is here; the
+/// upward `dir;/stop` form is not.
+fn path_candidates(entry: &Path, name: &str) -> Vec<std::path::PathBuf> {
+    if !entry.to_string_lossy().contains(['*', '?', '[', ']']) {
+        return vec![entry.join(name)];
+    }
+    let mut pattern: Vec<String> = entry
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    pattern.push(name.to_string());
+    // Everything before the first component with a wildcard is a plain
+    // directory, and the walk starts at the component after it. Building that
+    // head is done the way a path is: a drive letter and a root go together
+    // (`C:` and `\` are `C:\`, which pushing them one at a time does not do).
+    let wild_at = pattern
+        .iter()
+        .position(|part| part.contains(['*', '?', '[', ']']))
+        .unwrap_or(pattern.len() - 1);
+    let base = path_head(&pattern[..wild_at]);
+    let mut found = Vec::new();
+    match_directories(&base, &pattern, wild_at, &mut found);
+    found
+}
+
+/// A path from components, with a prefix and a root kept together.
+fn path_head(parts: &[String]) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut base = std::path::PathBuf::new();
+    let mut prefix: Option<String> = None;
+    for part in parts {
+        match std::path::Path::new(part).components().next() {
+            Some(Component::Prefix(found)) => {
+                prefix = Some(found.as_os_str().to_string_lossy().into_owned());
+            }
+            Some(Component::RootDir) => match prefix.take() {
+                Some(drive) => {
+                    base =
+                        std::path::PathBuf::from(format!("{drive}{}", std::path::MAIN_SEPARATOR));
+                }
+                None => base.push(std::path::MAIN_SEPARATOR.to_string()),
+            },
+            _ => base.push(part),
+        }
+    }
+    base
+}
+
+/// Every file `pattern` names, reading it from `depth` on.
+///
+/// `at` is the directory the components so far land in; `index` is the component
+/// being read. The last component is the file name and is matched literally,
+/// since it came from the buffer rather than from the setting.
+/// Every file `pattern` names, reading it from `index` on, into `out`.
+///
+/// `at` is the directory the components so far land in; `index` is the component
+/// being read. The last component is the file name and is matched literally,
+/// since it came from the buffer rather than from the setting. The results go
+/// into `out` rather than being returned, because the walk calls this once per
+/// directory it reaches: a return value would be dropped by the caller that does
+/// not look at it.
+fn match_directories(
+    at: &Path,
+    pattern: &[String],
+    index: usize,
+    out: &mut Vec<std::path::PathBuf>,
+) {
+    let Some(part) = pattern.get(index) else {
+        return;
+    };
+    if index + 1 == pattern.len() {
+        let candidate = at.join(part);
+        if candidate.is_file() {
+            out.push(candidate);
+        }
+        return;
+    }
+    if let Some(depth) = starstar_depth(part) {
+        // `**`: this directory, and the ones under it, however deep the number
+        // allows. `walk_down` visits this directory first, so `**0` is it.
+        walk_down(at, depth, out, index, pattern);
+        return;
+    }
+    if part.contains(['*', '?', '[', ']']) {
+        for name in names_in(at) {
+            if glob_matches(part, &name) {
+                match_directories(&at.join(name), pattern, index + 1, out);
+            }
+        }
+        return;
+    }
+    let next = at.join(part);
+    if next.is_dir() {
+        match_directories(&next, pattern, index + 1, out);
+    }
+}
+
+/// Look for the rest of the pattern in `dir` and in every directory under it,
+/// `depth` levels down.
+fn walk_down(
+    dir: &Path,
+    depth: usize,
+    out: &mut Vec<std::path::PathBuf>,
+    index: usize,
+    pattern: &[String],
+) {
+    match_directories(dir, pattern, index + 1, out);
+    if depth == 0 {
+        return;
+    }
+    for name in names_in(dir) {
+        let next = dir.join(&name);
+        if next.is_dir() {
+            walk_down(&next, depth - 1, out, index, pattern);
+        }
+    }
+}
+
+/// The number of levels a `**` component stands for, or `None` if it is not one.
+///
+/// Vim's rule: `**` or `**N`, with N between 0 and 100 and thirty when nothing is
+/// said.
+fn starstar_depth(part: &str) -> Option<usize> {
+    let rest = part.strip_prefix("**")?;
+    if rest.is_empty() {
+        return Some(30);
+    }
+    rest.parse::<usize>().ok().map(|level| level.min(100))
+}
+
+/// The names in a directory, in a stable order, or nothing when it is not one.
+fn names_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// Whether `name` matches a pattern with `*`, `?` and `[...]` in it.
+///
+/// `*` is a run of characters within one name — the path separator is not
+/// special here, because a component never has one.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    matches_from(&pattern, &name)
+}
+
+fn matches_from(pattern: &[char], name: &[char]) -> bool {
+    let Some(&first) = pattern.first() else {
+        return name.is_empty();
+    };
+    match first {
+        '*' => (0..=name.len()).any(|skip| matches_from(&pattern[1..], &name[skip..])),
+        '?' => !name.is_empty() && matches_from(&pattern[1..], &name[1..]),
+        '[' => {
+            let Some(close) = pattern.iter().position(|&c| c == ']') else {
+                return !name.is_empty()
+                    && name[0] == '['
+                    && matches_from(&pattern[1..], &name[1..]);
+            };
+            let set = &pattern[1..close];
+            let (negated, set) = match set.split_first() {
+                Some(('^', rest)) => (true, rest),
+                _ => (false, set),
+            };
+            let hit = name.first().is_some_and(|c| {
+                let inside = set
+                    .windows(3)
+                    .filter(|w| w[1] == '-')
+                    .any(|w| w[0] <= *c && *c <= w[2])
+                    || set.contains(c);
+                inside != negated
+            });
+            hit && matches_from(&pattern[close + 1..], &name[1..])
+        }
+        other => name.first() == Some(&other) && matches_from(&pattern[1..], &name[1..]),
+    }
 }
 
 /// The run of file-name characters the cursor is on, if it is on one.

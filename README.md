@@ -401,7 +401,11 @@ typed.
 than as a word, so `src/main.rs` is one name and not three. It is looked for beside
 the file that is open first, since that is what a name in a file means, and then in
 `'path'` — a comma-separated list of directories searched in order, which is how a
-name in an `import` line finds a file in another directory (`:set path=src,tests`). A name that is not
+name in an `import` line finds a file in another directory (`:set path=src,tests`). An
+entry may hold a wildcard, which is vim's `file-searching`: `*` is a run of
+characters within one name, and a component that is exactly `**` means that
+directory and everything under it — thirty levels, or as many as `**5` says — so
+`:set path=**` finds a file anywhere under the one that is open. A name that is not
 there says `E484` rather than being made into a new file: `:e` is how a person makes
 one, and `gf` is a jump.
 

@@ -306,9 +306,10 @@ does not throw the undone branch away. `u` and `<C-r>` walk the branch the text
 is on, while `g-` and `g+` (with a count: `3g-`) walk the states in the order
 they were *made*, whichever branch they are on — which is how you get back to
 what you undid. `:earlier {count}` and `:later {count}` are the same two from the
-`:` line, and `:undolist` names the leaves of the tree, each with how deep it is
-and how long ago it was made. Vim's time forms (`:earlier 10s`, `1f`) are not
-implemented.
+`:` line, with vim's time forms as well — `:earlier 10s`, `:later 1h`, in
+seconds, minutes, hours or days — and `:undolist` names the leaves of the tree,
+each with the number `:undo {number}` takes, how deep it is and how long ago it
+was made. `{N}f` (file writes) is the one form that is not there.
 
 Writing the file clears the modified flag, not the history: `:q` after a `u`
 still refuses until you write again. Reopening a file (`:e`) starts a fresh

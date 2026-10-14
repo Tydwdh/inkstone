@@ -72,6 +72,8 @@ fn command_name(cmd: &str) -> Option<&'static str> {
         "tabsplit" => "tab_split",
         "nohlsearch" | "noh" => "nohlsearch",
         "undolist" | "undol" => "undolist",
+        "undo" | "u" => "undo",
+        "redo" | "red" => "redo",
         "earlier" | "ea" => "earlier",
         "later" | "lat" => "later",
         "&" => "substitute_again",

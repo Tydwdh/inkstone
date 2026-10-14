@@ -63,8 +63,11 @@
   branch away. `u`/`<C-r>` walk the branch the text is on, `g-`/`g+` (with
   counts) walk the states in the order they were *made* whichever branch they are
   on, `:earlier {count}`/`:later {count}` are the same from the `:` line, and
-  `:undolist` names the leaves of the tree with how deep and how old each is.
-  Vim's time forms (`:earlier 10s`, `1f`) are not implemented.
+  `:undolist` names the leaves of the tree, with the number `:undo {number}`
+  takes, how deep each is and how old.
+- `:undo {number}` jumps to the state a number names, and `:earlier`/`:later`
+  take vim's time forms as well as a count: `:earlier 10s`, `:later 1h`, in
+  seconds, minutes, hours or days. `{N}f` (file writes) is not implemented.
 - `:undolist` counts leaves, not states: a state something else was made from is
   not one.
 

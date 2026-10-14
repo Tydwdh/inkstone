@@ -751,6 +751,40 @@ impl History {
         cursor
     }
 
+    /// The state about `offset` older (or newer) than the one the text is in:
+    /// what `:earlier 10s` and `:later 1h` go to.
+    ///
+    /// Clamped the way vim's are: nothing that old goes to the state the buffer
+    /// arrived in, and nothing that new goes to the newest state there is. The
+    /// reading is from the current state's time rather than from now, which is
+    /// what makes the two commands inverse to each other.
+    pub(crate) fn state_about(&self, offset: std::time::Duration, forward: bool) -> usize {
+        let from = self.states[self.current].at;
+        if forward {
+            let target = from + offset;
+            self.states
+                .iter()
+                .enumerate()
+                .find(|(index, state)| *index > self.current && state.at >= target)
+                .map(|(index, _)| index)
+                .unwrap_or(self.states.len() - 1)
+        } else {
+            let target = from.checked_sub(offset).unwrap_or(from);
+            self.states
+                .iter()
+                .enumerate()
+                .filter(|(index, state)| *index < self.current && state.at <= target)
+                .map(|(index, _)| index)
+                .next_back()
+                .unwrap_or(0)
+        }
+    }
+
+    /// The state at `index`, if there is one — `:undo {number}`.
+    pub(crate) fn has_state(&self, index: usize) -> bool {
+        index < self.states.len()
+    }
+
     /// The state `count` steps older in the order they were made, if there is
     /// one: what `g-` goes to.
     pub(crate) fn earlier(&self, count: usize) -> Option<usize> {

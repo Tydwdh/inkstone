@@ -221,6 +221,23 @@ impl Editor {
         }
     }
 
+    /// Go to the state a number names — `:undo {number}`, whose numbers come
+    /// from `:undolist`.
+    pub fn goto_state_number(&mut self, number: usize) -> bool {
+        if !self.history.has_state(number) {
+            self.message = format!("E830: Undo number {number} not found");
+            return false;
+        }
+        self.goto_state(number)
+    }
+
+    /// Go about `offset` older (or newer) than the state the text is in:
+    /// `:earlier 10s`, `:later 1h`.
+    pub fn goto_about(&mut self, offset: std::time::Duration, forward: bool) {
+        let target = self.history.state_about(offset, forward);
+        self.goto_state(target);
+    }
+
     /// What `:undolist` shows: the states nothing was made from, with how deep
     /// each is and how long ago it was made.
     pub fn undo_list_text(&self) -> String {
@@ -228,11 +245,19 @@ impl Editor {
         if leaves.is_empty() {
             return "no changes".to_string();
         }
-        let mut parts = vec![format!("{} leaves", leaves.len())];
+        let mut parts = vec![format!(
+            "{} {}",
+            leaves.len(),
+            if leaves.len() == 1 { "leaf" } else { "leaves" }
+        )];
         for (index, age) in leaves.iter().take(8) {
+            let depth = self.history.depth_of(*index);
+            // The number is the one `:undo {number}` takes, which is why it is
+            // here at all: a list of leaves a person cannot go to is a report,
+            // not a tool.
             parts.push(format!(
-                "{} changes {}",
-                self.history.depth_of(*index),
+                "#{index}: {depth} change{} {}",
+                if depth == 1 { "" } else { "s" },
                 ago(*age)
             ));
         }

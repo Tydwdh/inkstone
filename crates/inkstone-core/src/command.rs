@@ -1380,9 +1380,23 @@ pub(crate) fn line_span(editor: &Editor, row: usize, count: usize) -> (usize, us
     (start, end)
 }
 
-fn undo(editor: &mut Editor, _params: &[Param]) -> Result<()> {
-    if !editor.undo() {
-        editor.message = "Already at oldest change".to_string();
+/// `u`, and `:undo` — one change, or the state a number names.
+///
+/// The number is what `:undolist` shows: state 0 is the text as it arrived, and
+/// `:undo 3` goes to the state after the third change, whichever branch it is on.
+fn undo(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let spec = motion_param(params).unwrap_or_default();
+    if spec.trim().is_empty() {
+        if !editor.undo() {
+            editor.message = "Already at oldest change".to_string();
+        }
+        return Ok(());
+    }
+    match spec.trim().parse::<usize>() {
+        Ok(number) => {
+            editor.goto_state_number(number);
+        }
+        Err(_) => editor.message = format!("E475: not a number: {spec:?}"),
     }
     Ok(())
 }
@@ -1506,28 +1520,56 @@ fn undo_later(editor: &mut Editor, params: &[Param]) -> Result<()> {
     Ok(())
 }
 
-/// `:earlier {count}` and `:later {count}`: the same two, from the `:` line. The
-/// time forms vim also takes (`{N}s`, `{N}f`) are not implemented.
+/// `:earlier {count}` and `:later {count}`: the same two, from the `:` line. A
+/// count is in states; vim's time forms are here too — `{N}s`, `{N}m`, `{N}h`,
+/// `{N}d` — and go about that long before or after the state the text is in.
 fn earlier(editor: &mut Editor, params: &[Param]) -> Result<()> {
-    let spec = motion_param(params).unwrap_or_default();
-    let (count, rest) = split_count(spec);
-    if !rest.is_empty() {
-        editor.message = "E475: only a count is understood: {rest}".to_string();
-        return Ok(());
-    }
-    editor.goto_older(count);
+    step_time(editor, params, false);
     Ok(())
 }
 
 fn later(editor: &mut Editor, params: &[Param]) -> Result<()> {
-    let spec = motion_param(params).unwrap_or_default();
-    let (count, rest) = split_count(spec);
-    if !rest.is_empty() {
-        editor.message = format!("E475: only a count is understood: {rest}");
-        return Ok(());
-    }
-    editor.goto_newer(count);
+    step_time(editor, params, true);
     Ok(())
+}
+
+fn step_time(editor: &mut Editor, params: &[Param], forward: bool) {
+    let spec = motion_param(params).unwrap_or_default();
+    let direction = if forward { "forward" } else { "back" };
+    match parse_offset(spec) {
+        Some(Some(offset)) => editor.goto_about(offset, forward),
+        Some(None) => {
+            let (count, _) = split_count(spec);
+            if forward {
+                editor.goto_newer(count);
+            } else {
+                editor.goto_older(count);
+            }
+        }
+        None => {
+            editor.message = format!("E475: cannot go {direction} by {spec:?}");
+        }
+    }
+}
+
+/// A `{N}` count, or a `{N}{unit}` time: `Some(Some(time))`, `Some(None)` for a
+/// plain count, and `None` when it is neither.
+fn parse_offset(spec: &str) -> Option<Option<std::time::Duration>> {
+    let digits: String = spec.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let count: u64 = digits.parse().ok()?;
+    let unit = spec[digits.len()..].trim();
+    let seconds = match unit {
+        "" => return Some(None),
+        "s" => count,
+        "m" => count * 60,
+        "h" => count * 3600,
+        "d" => count * 86400,
+        _ => return None,
+    };
+    Some(Some(std::time::Duration::from_secs(seconds)))
 }
 
 /// The count at the front of a `:` argument, and what is left of it.

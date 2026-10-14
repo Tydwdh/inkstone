@@ -353,8 +353,51 @@ fn undolist_names_the_leaves_of_the_tree() {
     feed(&mut ed, "dd");
     feed(&mut ed, ":undolist<Enter>");
     assert!(ed.message.starts_with("2 leaves"), "{}", ed.message);
-    assert!(ed.message.contains("1 changes"), "{}", ed.message);
     // The two leaves are the `x` branch and the `dd` one — the state the undo
-    // went back to is not a leaf, since something was made from it.
-    assert!(ed.message.matches("changes").count() == 2, "{}", ed.message);
+    // went back to is not a leaf, since something was made from it. The numbers
+    // are the ones `:undo` takes: state 0 is the buffer as it arrived.
+    assert!(ed.message.contains("#1: 1 change "), "{}", ed.message);
+    assert!(ed.message.contains("#2: 1 change "), "{}", ed.message);
+    assert_eq!(ed.message.matches("change ").count(), 2, "{}", ed.message);
+    feed(&mut ed, ":undo 2<Enter>");
+    assert_eq!(ed.buffer.text(), "two\n", "the branch, by its number");
+    feed(&mut ed, ":undo 1<Enter>");
+    assert_eq!(ed.buffer.text(), "ne\ntwo\n", "and the other one");
+    feed(&mut ed, ":undo 99<Enter>");
+    assert_eq!(ed.message, "E830: Undo number 99 not found");
+}
+
+#[test]
+fn earlier_and_later_understand_a_time() {
+    // `:earlier 10s` and `:later 1h` are vim's time forms: the state about that
+    // long before or after the one the text is in. A test cannot wait ten
+    // seconds, so what is checked here is the shape of the rule — a count in
+    // states, a time that is small enough to be the same state, and a refusal
+    // that names what it did not understand.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\ntwo\nthree\n");
+    feed(&mut ed, "x");
+    feed(&mut ed, "u");
+    // `:normal` runs its keys from the beginning of the line, a trap this
+    // project has met before: `dd` takes the first line, not the one the `x` was
+    // on.
+    feed(&mut ed, ":normal dd<Enter>");
+    assert_eq!(ed.buffer.text(), "two\nthree\n");
+
+    // Older than everything: the state the buffer arrived in.
+    feed(&mut ed, ":earlier 10s<Enter>");
+    assert_eq!(ed.buffer.text(), "one\ntwo\nthree\n");
+    // Newer than everything: the newest state there is.
+    feed(&mut ed, ":later 10s<Enter>");
+    assert_eq!(ed.buffer.text(), "two\nthree\n");
+    // A count in states is what `:earlier 1` means.
+    feed(&mut ed, ":earlier 1<Enter>");
+    assert_eq!(ed.buffer.text(), "ne\ntwo\nthree\n", "one state back");
+    // A unit that is not one says so.
+    feed(&mut ed, ":earlier 3q<Enter>");
+    assert!(
+        ed.message.starts_with("E475: cannot go back by"),
+        "{}",
+        ed.message
+    );
 }

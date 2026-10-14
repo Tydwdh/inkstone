@@ -2918,6 +2918,34 @@ person relies on should never do.
   file writes, `:undo {number}` — which needs `:undolist` to show numbers a
   person can type — and `'undolevels'`, since nothing here ever prunes the tree.
 
+## Done — `:undo {number}`, and time in `:earlier`/`:later`
+
+The undo tree's own left-for-later, which is what makes the tree *usable* rather
+than merely present: a leaf you cannot go to is a report, not a tool.
+
+- **What shipped:** `:undolist` now leads each leaf with the number `:undo
+  {number}` takes (state 0 is the text as it arrived), and `:undo {number}` jumps
+  to that state whichever branch it is on — `E830: Undo number {number} not
+  found` when there is no such state. `:earlier` and `:later` take vim's time
+  forms as well as a count: `{N}s`, `{N}m`, `{N}h`, `{N}d`, read from the current
+  state's time rather than from now, which is what makes them inverse to each
+  other.
+- **Constraints it had to respect, and how:** the command keeps its own *name*.
+  The first version of this called the registry entry `undo_to` so that `:undo
+  {N}` had somewhere to live — and that broke the daemon: the registry name is
+  the API, and a frontend or a script sending `undo` got "not a command". The
+  workspace tests said so (14 integration tests stopped running), and the fix is
+  the one in the tree now: one command, `undo`, which takes an optional number.
+- **What the smoke showed:** the whole feature in five frames — `:undolist`
+  saying `1 leaf   #2: 2 changes now`, `:undo 1` going to the state after the
+  first change, `:earlier 10s` going back to the text as it arrived (and clearing
+  the `[+]` modified marker, because that state *is* the state that was written),
+  and `:later 10s` coming forward again.
+- **Files:** `inkstone-core` (`History::state_about`/`has_state`, the editor's
+  `goto_state_number`/`goto_about`, `undo`'s optional number, `earlier`/`later`'s
+  `parse_offset`, `undo_list_text`'s numbers).
+- **Left for later:** `{N}f`, and `'undolevels'`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

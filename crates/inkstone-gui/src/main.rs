@@ -24,7 +24,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use inkstone_client::Daemon;
 use inkstone_rpc::{
-    ClientMsg, KeyCode, KeyMsg, Mod, Param, PointerKind, PointerMsg, Screen, ServerMsg,
+    ClickCounter, ClientMsg, KeyCode, KeyMsg, Mod, Param, PointerKind, PointerMsg, Screen,
+    ServerMsg,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize, Position, Size};
@@ -153,6 +154,9 @@ struct App {
     position: PhysicalPosition<f64>,
     /// Whether the left button is down, which is what makes a move a drag.
     dragging: bool,
+    /// How many clicks in a row the last press was: the frontend is the one with
+    /// a clock, so it counts them, and the manual says what each count selects.
+    clicks: ClickCounter,
     /// Whether the input method is currently allowed in, so the window is only
     /// told when the answer changes.
     ime_allowed: Option<bool>,
@@ -176,6 +180,7 @@ impl App {
             modifiers: ModifiersState::empty(),
             position: PhysicalPosition::new(0.0, 0.0),
             dragging: false,
+            clicks: ClickCounter::default(),
             ime_allowed: None,
             cursor: None,
             exit: ExitCode::SUCCESS,
@@ -382,7 +387,16 @@ impl App {
         let Some((x, y)) = self.cell_at(position) else {
             return;
         };
-        if let Err(err) = self.send(&ClientMsg::Pointer(PointerMsg::new(kind, x, y))) {
+        // A press is counted where the clock is — here — so the daemon is told
+        // how many clicks in a row it is: the same cell again quickly is a
+        // double click, and the manual says what that selects.
+        let msg = if kind == PointerKind::Press {
+            let count = self.clicks.press(x, y, std::time::Instant::now());
+            PointerMsg::click(kind, x, y, count)
+        } else {
+            PointerMsg::new(kind, x, y)
+        };
+        if let Err(err) = self.send(&ClientMsg::Pointer(msg)) {
             self.fail(event_loop, err);
         }
     }

@@ -2639,6 +2639,38 @@ The match shows while the pattern is still being typed.
   highlighted whenever a search is up, which is `'hlsearch'` always on), and
   `'nowrapscan'`.
 
+## Done — double, triple and quadruple clicks
+
+Extra clicks extend the selection, the way the manual spells out.
+
+- **What shipped:** `click → character, double → word or `%` match, triple → line,
+  quadruple → rectangular block`, with the two rules beside the table: "a double
+  click on a word selects that word … a double click on a character that has a
+  match selects until that match (like using `v%`)", and "dragging the mouse with
+  a double click … will result in whole words to be selected. This continues until
+  the button is released, at which point the selection is per character again."
+- **Constraints it had to respect, and how:** the counting needs a clock, and the
+  kernel has none — the message carries cells, not time. So the count travels in
+  `PointerMsg` (`clicks`), and a frontend counts presses with `ClickCounter`, whose
+  window is vim's `'mousetime'` (500ms) and whose rule is the same cell again. The
+  second constraint was the one the *smoke test* found: a release with no drag
+  used to clear the selection, which is right for a click and wrong for a double
+  click — the selection was undone the moment the button came up. A release now
+  only clears what a *single* press started.
+- **What the tests caught:** that a drag after a double click has to snap **both**
+  ends of the selection to word edges — snapping only the cursor leaves the
+  anchor's word half in on a backwards drag ("one two t" instead of "one two
+  three") — and that a click in the space between words has no word to take, so it
+  takes the space.
+- **Files:** `inkstone-rpc` (`PointerMsg::clicks`, `ClickCounter`,
+  `MOUSE_DOUBLE_CLICK_MS`), `inkstone-core` (`pointer_clicks`, `select_clicked_word`,
+  `select_clicked_line`, `select_clicked_block`, `snap_to_word_edges`, and
+  `bracket_at` factored out of `%` so the pointer can borrow its rule), both
+  frontends (one `ClickCounter` each).
+- **Left for later:** `'mousetime'` as a setting (the window is a constant in the
+  protocol today), and a double click in a help window jumping to the tag, which
+  this editor has no tags for.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

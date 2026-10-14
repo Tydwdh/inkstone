@@ -166,12 +166,65 @@ pub struct PointerMsg {
     pub x: u16,
     /// The screen row, zero-based from the top.
     pub y: u16,
+    /// How many presses in a row this is: 1 for a click, 2 for a double click,
+    /// 3 for a triple, 4 for a quadruple. A frontend counts them — it is the one
+    /// with a clock — and the manual says what each count selects: "double →
+    /// word or % match, triple → line, quadruple → rectangular block".
+    pub clicks: u8,
 }
 
 impl PointerMsg {
-    /// An event at `(x, y)`.
+    /// An event at `(x, y)`, one click.
     pub fn new(kind: PointerKind, x: u16, y: u16) -> Self {
-        Self { kind, x, y }
+        Self {
+            kind,
+            x,
+            y,
+            clicks: 1,
+        }
+    }
+
+    /// The same, as the `clicks`-th press in a row.
+    pub fn click(kind: PointerKind, x: u16, y: u16, clicks: u8) -> Self {
+        Self { kind, x, y, clicks }
+    }
+}
+
+/// How long two presses can be apart and still be one gesture: vim's
+/// `'mousetime'`, which is 500ms, and what xterm uses.
+pub const MOUSE_DOUBLE_CLICK_MS: u64 = 500;
+
+/// Counts presses into clicks: the same cell again within
+/// [`MOUSE_DOUBLE_CLICK_MS`] is the next click of one gesture.
+///
+/// The counting lives here rather than in the daemon because a frontend is the
+/// one that knows *when* a press happened — the message carries cells, not time.
+#[derive(Debug, Default)]
+pub struct ClickCounter {
+    at: Option<(u16, u16)>,
+    last: Option<std::time::Instant>,
+    count: u8,
+}
+
+impl ClickCounter {
+    /// A press at `(x, y)` now: how many clicks in a row this one is.
+    ///
+    /// A press somewhere else, or one after a pause, starts a new gesture, so a
+    /// second click is only a double click when it is on the same cell.
+    pub fn press(&mut self, x: u16, y: u16, now: std::time::Instant) -> u8 {
+        let again = self.at == Some((x, y))
+            && self.last.is_some_and(|last| {
+                now.duration_since(last).as_millis() < u128::from(MOUSE_DOUBLE_CLICK_MS)
+            });
+        // Four is as far as the manual goes; a fifth click is another quadruple.
+        self.count = if again {
+            self.count.saturating_add(1).min(4)
+        } else {
+            1
+        };
+        self.at = Some((x, y));
+        self.last = Some(now);
+        self.count
     }
 }
 
@@ -812,6 +865,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn clicks_are_counted_by_cell_and_by_time() {
+        let start = std::time::Instant::now();
+        let mut counter = ClickCounter::default();
+        let gap = std::time::Duration::from_millis(MOUSE_DOUBLE_CLICK_MS + 1);
+        let within = std::time::Duration::from_millis(MOUSE_DOUBLE_CLICK_MS - 1);
+
+        assert_eq!(counter.press(3, 4, start), 1, "the first press is a click");
+        assert_eq!(
+            counter.press(3, 4, start + within),
+            2,
+            "the same cell in time is a double click"
+        );
+        assert_eq!(counter.press(3, 4, start + within * 2), 3, "and a triple");
+        assert_eq!(
+            counter.press(3, 4, start + within * 3),
+            4,
+            "and a quadruple"
+        );
+        assert_eq!(
+            counter.press(3, 4, start + within * 4),
+            4,
+            "four is as far as the manual goes"
+        );
+        assert_eq!(
+            counter.press(9, 4, start + within * 5),
+            1,
+            "another cell starts a new gesture"
+        );
+        assert_eq!(
+            counter.press(9, 4, start + within * 5 + gap),
+            1,
+            "and so does a pause"
+        );
+    }
+
     fn client_samples() -> Vec<ClientMsg> {
         vec![
             ClientMsg::Input(KeyMsg::new(KeyCode::Esc)),
@@ -822,6 +911,7 @@ mod tests {
             }),
             ClientMsg::Text("好\nsecond line\r\n".to_string()),
             ClientMsg::Pointer(PointerMsg::new(PointerKind::Press, 3, 4)),
+            ClientMsg::Pointer(PointerMsg::click(PointerKind::Press, 3, 4, 2)),
             ClientMsg::Pointer(PointerMsg::new(PointerKind::ScrollDown, 0, 0)),
             ClientMsg::Copy,
             ClientMsg::Resize {

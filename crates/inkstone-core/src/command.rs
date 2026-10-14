@@ -490,46 +490,60 @@ fn toggle_case(editor: &mut Editor, params: &[Param]) -> Result<()> {
 /// front of a `(` still matches it, and a bracket with no pair is said so rather
 /// than guessed at.
 fn match_bracket(editor: &mut Editor, _params: &[Param]) -> Result<()> {
-    const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
     let at = editor.cursor.char_idx(&editor.buffer);
     let row = editor.cursor.row;
-    let line_start = editor.buffer.line_col_to_char(row, 0);
-    let line_end = line_start + editor.buffer.line_len(row);
-    let here = editor.buffer.char_at(at);
-    let opener = PAIRS
-        .iter()
-        .find(|(open, close)| here == Some(*open) || here == Some(*close))
-        .or_else(|| {
-            PAIRS.iter().find(|(open, close)| {
-                (at..line_end)
-                    .any(|index| matches!(editor.buffer.char_at(index), Some(c) if c == *open || c == *close))
-            })
-        });
-    let Some(&(open, close)) = opener else {
+    let Some((from, pair)) = bracket_at(&editor.buffer, row, at) else {
         editor.message = "no bracket here".to_string();
         return Ok(());
     };
-    // The bracket actually being matched, then its pair, searched outwards from
-    // there — the same search the text objects use.
-    let (from, to) = match here {
-        Some(c) if c == open => (at, matching_close(&editor.buffer, at, open, close)),
-        Some(c) if c == close => (at, enclosing_open(&editor.buffer, at, open, close)),
-        _ => {
-            let found = (at..line_end)
-                .find(|index| matches!(editor.buffer.char_at(*index), Some(c) if c == open || c == close))
-                .unwrap_or(at);
-            match editor.buffer.char_at(found) {
-                Some(c) if c == open => (found, matching_close(&editor.buffer, found, open, close)),
-                _ => (found, enclosing_open(&editor.buffer, found, open, close)),
-            }
-        }
-    };
-    let Some(target) = to else {
+    let Some(target) = pair else {
         editor.message = format!("no match for {from:?}");
         return Ok(());
     };
     editor.cursor.set_char_idx(&editor.buffer, target);
     Ok(())
+}
+
+/// The bracket `%` would work on, and where its pair is.
+///
+/// The bracket under the cursor, or else the first one on the cursor's line, so
+/// `%` in front of a `(` still matches it. `None` for the whole thing means
+/// there is no bracket there; `Some((at, None))` means there is one and it has
+/// no pair. The pointer borrows this for a double click, where the manual says
+/// "a double click on a character that has a match selects until that match
+/// (like using `v%`)".
+pub(crate) fn bracket_at(buffer: &Buffer, row: usize, at: usize) -> Option<(usize, Option<usize>)> {
+    const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+    let line_start = buffer.line_col_to_char(row, 0);
+    let line_end = line_start + buffer.line_len(row);
+    let here = buffer.char_at(at);
+    let opener = PAIRS
+        .iter()
+        .find(|(open, close)| here == Some(*open) || here == Some(*close))
+        .or_else(|| {
+            PAIRS.iter().find(|(open, close)| {
+                (at..line_end).any(
+                    |index| matches!(buffer.char_at(index), Some(c) if c == *open || c == *close),
+                )
+            })
+        });
+    let &(open, close) = opener?;
+    // The bracket actually being matched, then its pair, searched outwards from
+    // there — the same search the text objects use.
+    let (from, to) = match here {
+        Some(c) if c == open => (at, matching_close(buffer, at, open, close)),
+        Some(c) if c == close => (at, enclosing_open(buffer, at, open, close)),
+        _ => {
+            let found = (at..line_end)
+                .find(|index| matches!(buffer.char_at(*index), Some(c) if c == open || c == close))
+                .unwrap_or(at);
+            match buffer.char_at(found) {
+                Some(c) if c == open => (found, matching_close(buffer, found, open, close)),
+                _ => (found, enclosing_open(buffer, found, open, close)),
+            }
+        }
+    };
+    Some((from, to))
 }
 
 /// Which kind of find a motion name is, if it is one.
@@ -2690,7 +2704,7 @@ fn word_class(c: char) -> WordClass {
 /// The word is the run of one kind of character the cursor is in. On whitespace
 /// that run *is* the whitespace, which is what vim does and what makes `diw`
 /// between two words take the space rather than the next word.
-fn word_object(buffer: &Buffer, at: usize, object: Object) -> Option<(usize, usize)> {
+pub(crate) fn word_object(buffer: &Buffer, at: usize, object: Object) -> Option<(usize, usize)> {
     let here = buffer.char_at(at)?;
     let class = word_class(here);
     if class == WordClass::Space && object == Object::Around {

@@ -22,8 +22,9 @@ use crossterm::{cursor, execute, queue, terminal};
 use inkstone_client::Daemon;
 
 use inkstone_rpc::{
-    ClientMsg, Color, KeyCode, KeyMsg, Mod, Param, PointerKind, PointerMsg, Screen, ServerMsg,
-    ATTR_BOLD, ATTR_FAINT, ATTR_ITALIC, ATTR_REVERSE, ATTR_STRIKETHROUGH, ATTR_UNDERLINE,
+    ClickCounter, ClientMsg, Color, KeyCode, KeyMsg, Mod, Param, PointerKind, PointerMsg, Screen,
+    ServerMsg, ATTR_BOLD, ATTR_FAINT, ATTR_ITALIC, ATTR_REVERSE, ATTR_STRIKETHROUGH,
+    ATTR_UNDERLINE,
 };
 
 #[derive(Debug, Parser)]
@@ -125,10 +126,13 @@ fn spawn_input_reader() -> Receiver<ClientMsg> {
 }
 
 fn input_loop(tx: Sender<ClientMsg>) {
+    // Presses are counted here, where the clock is: the same cell again within
+    // `'mousetime'` is the next click of one gesture.
+    let mut clicks = ClickCounter::default();
     loop {
         match event::read() {
             Ok(event) => {
-                if let Some(msg) = to_client_msg(event) {
+                if let Some(msg) = to_client_msg(event, &mut clicks) {
                     if tx.send(msg).is_err() {
                         return;
                     }
@@ -186,7 +190,7 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
-fn to_client_msg(event: Event) -> Option<ClientMsg> {
+fn to_client_msg(event: Event, clicks: &mut ClickCounter) -> Option<ClientMsg> {
     match event {
         Event::Key(key) => {
             if key.kind == KeyEventKind::Release {
@@ -196,8 +200,9 @@ fn to_client_msg(event: Event) -> Option<ClientMsg> {
         }
         Event::Resize(cols, rows) => Some(ClientMsg::Resize { cols, rows }),
         // The pointer, in screen cells: what a cell means is the daemon's
-        // business, so nothing is decided here.
-        Event::Mouse(mouse) => to_pointer_msg(mouse).map(ClientMsg::Pointer),
+        // business, so nothing is decided here — except how many clicks in a row
+        // a press is, which needs a clock and so belongs to the frontend.
+        Event::Mouse(mouse) => to_pointer_msg(mouse, clicks).map(ClientMsg::Pointer),
         // A paste is text, not keys: sending it as keys would run whatever
         // commands it happens to spell.
         Event::Paste(text) => Some(ClientMsg::Text(text)),
@@ -211,7 +216,7 @@ fn to_client_msg(event: Event) -> Option<ClientMsg> {
 /// The middle and right buttons, and a bare move with nothing pressed, are not
 /// part of it: a frontend sends what it can, and the daemon ignores what it does
 /// not understand.
-fn to_pointer_msg(mouse: event::MouseEvent) -> Option<PointerMsg> {
+fn to_pointer_msg(mouse: event::MouseEvent, clicks: &mut ClickCounter) -> Option<PointerMsg> {
     let kind = match mouse.kind {
         event::MouseEventKind::Down(event::MouseButton::Left) => PointerKind::Press,
         event::MouseEventKind::Up(event::MouseButton::Left) => PointerKind::Release,
@@ -220,6 +225,10 @@ fn to_pointer_msg(mouse: event::MouseEvent) -> Option<PointerMsg> {
         event::MouseEventKind::ScrollDown => PointerKind::ScrollDown,
         _ => return None,
     };
+    if kind == PointerKind::Press {
+        let count = clicks.press(mouse.column, mouse.row, std::time::Instant::now());
+        return Some(PointerMsg::click(kind, mouse.column, mouse.row, count));
+    }
     Some(PointerMsg::new(kind, mouse.column, mouse.row))
 }
 
@@ -618,6 +627,12 @@ mod tests {
         assert!(to_key_msg(key(event::KeyCode::Insert, KeyModifiers::empty())).is_none());
     }
 
+    /// The translation with a fresh counter: the cases here are about keys and
+    /// pastes, not about clicks.
+    fn to_client_msg(event: Event) -> Option<ClientMsg> {
+        super::to_client_msg(event, &mut ClickCounter::default())
+    }
+
     #[test]
     fn a_paste_becomes_text_and_a_key_becomes_a_key() {
         assert_eq!(
@@ -691,29 +706,42 @@ mod tests {
             row: 4,
             modifiers: KeyModifiers::empty(),
         };
+        let mut clicks = ClickCounter::default();
         assert_eq!(
-            to_pointer_msg(mouse(MouseEventKind::Down(MouseButton::Left))),
-            Some(PointerMsg::new(PointerKind::Press, 3, 4))
+            to_pointer_msg(mouse(MouseEventKind::Down(MouseButton::Left)), &mut clicks),
+            Some(PointerMsg::click(PointerKind::Press, 3, 4, 1))
+        );
+        // The same cell again, straight away: the frontend counts it as the
+        // second click of one gesture, which is what a double click is.
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::Down(MouseButton::Left)), &mut clicks),
+            Some(PointerMsg::click(PointerKind::Press, 3, 4, 2))
         );
         assert_eq!(
-            to_pointer_msg(mouse(MouseEventKind::Up(MouseButton::Left))),
+            to_pointer_msg(mouse(MouseEventKind::Up(MouseButton::Left)), &mut clicks),
             Some(PointerMsg::new(PointerKind::Release, 3, 4))
         );
         assert_eq!(
-            to_pointer_msg(mouse(MouseEventKind::Drag(MouseButton::Left))),
+            to_pointer_msg(mouse(MouseEventKind::Drag(MouseButton::Left)), &mut clicks),
             Some(PointerMsg::new(PointerKind::Drag, 3, 4))
         );
         assert_eq!(
-            to_pointer_msg(mouse(MouseEventKind::ScrollDown)),
+            to_pointer_msg(mouse(MouseEventKind::ScrollDown), &mut clicks),
             Some(PointerMsg::new(PointerKind::ScrollDown, 3, 4))
         );
 
         // Buttons the protocol does not carry, and a move with nothing pressed.
         assert_eq!(
-            to_pointer_msg(mouse(MouseEventKind::Down(MouseButton::Middle))),
+            to_pointer_msg(
+                mouse(MouseEventKind::Down(MouseButton::Middle)),
+                &mut clicks
+            ),
             None
         );
-        assert_eq!(to_pointer_msg(mouse(MouseEventKind::Moved)), None);
+        assert_eq!(
+            to_pointer_msg(mouse(MouseEventKind::Moved), &mut clicks),
+            None
+        );
     }
 
     #[test]

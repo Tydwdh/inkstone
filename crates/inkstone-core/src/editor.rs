@@ -1181,6 +1181,9 @@ pub struct Editor {
     /// Whether the pointer has dragged since it was pressed, which is what tells
     /// a click from a drag.
     pub mouse_dragged: bool,
+    /// How many clicks in a row the press that is in progress was: what it
+    /// selected (a word, a line, a block) and what a drag from it extends by.
+    pointer_clicks: u8,
     /// Text on its way to the system clipboard: a command fills this in, the
     /// daemon turns it into a message, the frontend writes it where text goes.
     /// Nothing in the kernel can reach a clipboard, and nothing here pretends
@@ -1288,6 +1291,7 @@ impl Editor {
             insert_log: None,
             selection: None,
             mouse_dragged: false,
+            pointer_clicks: 1,
             clipboard: None,
             search: Search::new(),
             incsearch: None,
@@ -1392,17 +1396,28 @@ impl Editor {
                 self.selection = None;
                 self.mode = Mode::Normal;
                 self.clear_pending();
+                // A click, a double click and the rest are one gesture with a
+                // count, and the count says what is selected: "double → word or
+                // % match, triple → line, quadruple → rectangular block".
+                self.pointer_clicks = msg.clicks.max(1);
                 if let Some((window, at)) = self.position_at_screen(msg.x, msg.y) {
                     // A press in another window goes to that window first, the
                     // way a click in vim does.
                     self.switch_to_window(window);
                     self.cursor = at;
                     self.clamp_cursor();
-                    self.selection = Some(Selection {
-                        anchor: self.cursor,
-                        kind: VisualKind::Charwise,
-                        to_end: false,
-                    });
+                    match self.pointer_clicks {
+                        1 => {
+                            self.selection = Some(Selection {
+                                anchor: self.cursor,
+                                kind: VisualKind::Charwise,
+                                to_end: false,
+                            })
+                        }
+                        2 => self.select_clicked_word(),
+                        3 => self.select_clicked_line(),
+                        _ => self.select_clicked_block(),
+                    }
                     self.mode = Mode::Visual;
                     self.mouse_dragged = false;
                     self.after_edit();
@@ -1432,6 +1447,13 @@ impl Editor {
                         if window == self.current_window {
                             self.mouse_dragged = true;
                             self.cursor = at;
+                            // "Dragging the mouse with a double click … will
+                            // result in whole words to be selected. This
+                            // continues until the button is released, at which
+                            // point the selection is per character again."
+                            if self.pointer_clicks == 2 {
+                                self.snap_to_word_edges();
+                            }
                             self.clamp_cursor();
                             self.after_edit();
                         }
@@ -1440,9 +1462,11 @@ impl Editor {
             }
             PointerKind::Release => {
                 self.resizing = None;
-                if self.selection.is_some() && !self.mouse_dragged {
+                if self.selection.is_some() && !self.mouse_dragged && self.pointer_clicks == 1 {
                     // A press and a release with no drag between them is a
-                    // click: the cursor stays, the selection goes.
+                    // click: the cursor stays, the selection goes. A double
+                    // click is not that — what it selected stays selected, or
+                    // the selection would end the moment the button came up.
                     self.selection = None;
                     self.mode = Mode::Normal;
                 }
@@ -1453,6 +1477,113 @@ impl Editor {
             PointerKind::ScrollDown => self.scroll_view(MOUSE_SCROLL_LINES),
         }
         self.redraw = true;
+    }
+
+    /// What a double click selects: the word under the pointer, or — when the
+    /// character clicked is one `%` matches — everything up to its pair.
+    ///
+    /// "A double click on a word selects that word. … A double click on a
+    /// character that has a match selects until that match (like using `v%`)."
+    fn select_clicked_word(&mut self) {
+        let at = self.cursor.char_idx(&self.buffer);
+        let row = self.cursor.row;
+        // A bracket is the exception: `%` knows where its pair is. The character
+        // clicked is the one asked about — a click on a word that happens to be
+        // on the same line as a bracket is still a click on the word.
+        if let Some((from, Some(target))) = crate::command::bracket_at(&self.buffer, row, at) {
+            if from == at {
+                self.selection = Some(Selection {
+                    anchor: self.cursor,
+                    kind: VisualKind::Charwise,
+                    to_end: false,
+                });
+                self.cursor.set_char_idx(&self.buffer, target);
+                return;
+            }
+        }
+        // The word under the pointer, and the cursor at its end so the selection
+        // is the whole word rather than from where in it the click landed.
+        let Some((start, end)) = crate::command::word_object(&self.buffer, at, Object::Inner)
+        else {
+            self.selection = Some(Selection {
+                anchor: self.cursor,
+                kind: VisualKind::Charwise,
+                to_end: false,
+            });
+            return;
+        };
+        let last = end.saturating_sub(1).max(start);
+        let (anchor_row, anchor_col) = self.buffer.char_to_line_col(start);
+        self.selection = Some(Selection {
+            anchor: Cursor::new(anchor_row, anchor_col),
+            kind: VisualKind::Charwise,
+            to_end: false,
+        });
+        self.cursor.set_char_idx(&self.buffer, last);
+    }
+
+    /// What a triple click selects: the line under the pointer.
+    fn select_clicked_line(&mut self) {
+        self.selection = Some(Selection {
+            anchor: Cursor::new(self.cursor.row, 0),
+            kind: VisualKind::Linewise,
+            to_end: false,
+        });
+        let row = self.cursor.row;
+        let end = self.buffer.line_col_to_char(row, self.buffer.line_len(row));
+        self.cursor
+            .set_char_idx(&self.buffer, end.saturating_sub(1));
+    }
+
+    /// What a quadruple click selects: a rectangle, which is the whole line
+    /// until a drag gives it a width.
+    fn select_clicked_block(&mut self) {
+        self.selection = Some(Selection {
+            anchor: Cursor::new(self.cursor.row, 0),
+            kind: VisualKind::Blockwise,
+            to_end: false,
+        });
+        let row = self.cursor.row;
+        let end = self.buffer.line_col_to_char(row, self.buffer.line_len(row));
+        self.cursor
+            .set_char_idx(&self.buffer, end.saturating_sub(1));
+    }
+
+    /// Put both ends of the selection on the near edges of the words they are
+    /// in, which is what makes a drag after a double click take whole words.
+    ///
+    /// Both ends, because a selection is a span: a backwards drag that only
+    /// moved its cursor would leave the anchor's word half in.
+    fn snap_to_word_edges(&mut self) {
+        let Some(selection) = self.selection else {
+            return;
+        };
+        let anchor_at = selection.anchor.char_idx(&self.buffer);
+        let cursor_at = self.cursor.char_idx(&self.buffer);
+        let backwards = cursor_at < anchor_at;
+        let word = |at: usize| crate::command::word_object(&self.buffer, at, Object::Inner);
+        if let Some((start, end)) = word(anchor_at) {
+            let at = if backwards {
+                end.saturating_sub(1).max(start)
+            } else {
+                start
+            };
+            let (row, col) = self.buffer.char_to_line_col(at);
+            self.selection = Some(Selection {
+                anchor: Cursor::new(row, col),
+                ..selection
+            });
+        }
+        if let Some((start, end)) = word(cursor_at) {
+            // Backwards drags end at the start of the word, forwards ones at its
+            // end, so the selection is whole words whichever way it is going.
+            let at = if backwards {
+                start
+            } else {
+                end.saturating_sub(1).max(start)
+            };
+            self.cursor.set_char_idx(&self.buffer, at);
+        }
     }
 
     /// Put what the editor is holding on its way to the clipboard: the
@@ -12710,6 +12841,122 @@ mod tests {
         // can be a keystroke behind.
         ed.execute_cmdline("setdiag 99:1:99:2:error:gone");
         assert_eq!(ed.diagnostics[0].start.0, 2);
+    }
+
+    #[test]
+    fn a_double_click_selects_the_word_under_the_pointer() {
+        use inkstone_rpc::{PointerKind, PointerMsg};
+        let mut ed = Editor::for_tests();
+        ed.viewport.width = 40;
+        ed.viewport.height = 12;
+        ed.buffer = Buffer::from_text("one two three\n");
+        ed.options.borrow_mut().number = true;
+        let gutter = crate::render::gutter_width(ed.buffer.line_count(), true);
+        // The click lands in the middle of `two`, and the selection is the whole
+        // word either way — the manual's "double → word".
+        let at = gutter + 5;
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, at, 0, 2));
+        assert_eq!(ed.mode, Mode::Visual, "a double click selects");
+        let selected = |ed: &Editor| {
+            let (start, end) = ed.visual_span().expect("a selection");
+            ed.buffer.slice_text(start, end)
+        };
+        assert_eq!(selected(&ed), "two");
+        assert_eq!(ed.cursor, Cursor::new(0, 6), "the cursor is at its end");
+        // The button comes up, which is the second half of the second click: the
+        // selection stays, or a double click would be undone the moment the
+        // button was released.
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Release, at, 0));
+        assert_eq!(selected(&ed), "two", "still selected after the release");
+        assert_eq!(ed.mode, Mode::Visual);
+        // A click in the space between words takes that space: there is no word
+        // there, and a selection has to be something.
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, gutter + 3, 0, 2));
+        assert_eq!(selected(&ed), " ", "the space under the pointer");
+
+        // A single click is still a click: nothing stays selected.
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Press, at, 0));
+        assert_eq!(ed.mode, Mode::Visual);
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Release, at, 0));
+        assert!(ed.selection.is_none(), "a press and a release is a click");
+        assert_eq!(ed.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn a_double_click_on_a_bracket_selects_up_to_its_pair() {
+        use inkstone_rpc::{PointerKind, PointerMsg};
+        let mut ed = Editor::for_tests();
+        ed.viewport.width = 40;
+        ed.viewport.height = 12;
+        ed.buffer = Buffer::from_text("f(a b) x\n");
+        let at = |col: u16| col;
+        // On the `(`: the manual's "a double click on a character that has a
+        // match selects until that match (like using `v%`)".
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, at(1), 0, 2));
+        let (start, end) = ed.visual_span().expect("a selection");
+        assert_eq!(ed.buffer.slice_text(start, end), "(a b)");
+        assert_eq!(ed.cursor, Cursor::new(0, 5), "the cursor is on the `)`");
+        // On the word inside them: the word, not the brackets — the character
+        // clicked is the one asked about.
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, at(2), 0, 2));
+        let (start, end) = ed.visual_span().expect("a selection");
+        assert_eq!(ed.buffer.slice_text(start, end), "a");
+    }
+
+    #[test]
+    fn a_triple_click_selects_the_line_and_a_quadruple_a_block() {
+        use inkstone_rpc::{PointerKind, PointerMsg};
+        let mut ed = Editor::for_tests();
+        ed.viewport.width = 40;
+        ed.viewport.height = 12;
+        ed.buffer = Buffer::from_text("one two\nthree four\n");
+        // Triple: the line, terminator and all — "triple → line".
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, 5, 1, 3));
+        assert_eq!(ed.selection.map(|s| s.kind), Some(VisualKind::Linewise));
+        let (start, end) = ed.visual_span().expect("a selection");
+        assert_eq!(ed.buffer.slice_text(start, end), "three four\n");
+        // Quadruple: a rectangle, which is the whole line until a drag gives it
+        // a width — "quadruple → rectangular block".
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, 5, 1, 4));
+        assert_eq!(ed.selection.map(|s| s.kind), Some(VisualKind::Blockwise));
+        assert_eq!(
+            ed.visual_block()
+                .map(|(first, last, left, _)| (first, last, left)),
+            Some((1, 1, 0)),
+            "the whole line, from its first column"
+        );
+    }
+
+    #[test]
+    fn a_drag_after_a_double_click_takes_whole_words() {
+        use inkstone_rpc::{PointerKind, PointerMsg};
+        let mut ed = Editor::for_tests();
+        ed.viewport.width = 40;
+        ed.viewport.height = 12;
+        ed.buffer = Buffer::from_text("one two three\n");
+        // "Dragging the mouse with a double click … will result in whole words
+        // to be selected." The drag ends in the middle of `three`, and the
+        // selection still covers it whole.
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, 1, 0, 2));
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Drag, 10, 0));
+        let (start, end) = ed.visual_span().expect("a selection");
+        assert_eq!(ed.buffer.slice_text(start, end), "one two three");
+        // Backwards, the same: whole words — from the start of the word dragged
+        // onto, to the end of the one that was double clicked.
+        ed.handle_pointer(&PointerMsg::click(PointerKind::Press, 10, 0, 2));
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Drag, 1, 0));
+        let (start, end) = ed.visual_span().expect("a selection");
+        assert_eq!(ed.buffer.slice_text(start, end), "one two three");
+        // Releasing ends the gesture, so a later drag is per character again.
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Release, 1, 0));
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Press, 1, 0));
+        ed.handle_pointer(&PointerMsg::new(PointerKind::Drag, 2, 0));
+        let (start, end) = ed.visual_span().expect("a selection");
+        assert_eq!(
+            ed.buffer.slice_text(start, end),
+            "ne",
+            "columns one to two, per character again"
+        );
     }
 
     #[test]

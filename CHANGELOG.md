@@ -26,6 +26,12 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- Double, triple and quadruple clicks select what the manual says they do: a word
+  under the pointer (or, on a bracket, everything up to its pair), a line, and a
+  rectangular block. A drag after a double click takes whole words until the
+  button comes up, and a double click's selection survives the release — a click
+  is still a click, but a double click is not one. The frontend counts the clicks,
+  because it is the one with a clock: the protocol carries the count, not a time.
 - `'incsearch'`, on by default: the cursor goes to the match while a search is
   still being typed, and is drawn on that match rather than on the line being
   typed, so a search is aimed rather than committed blind. `<Enter>` accepts it

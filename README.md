@@ -51,11 +51,15 @@ line numbers, tabstop, status line, `.` to do the last change again, and
 Two frontends draw it: `inkstone` in a terminal, and `inkstone-gui` in a window,
 where the screen is drawn on the GPU and an input method works in insert mode.
 Both are the same program below the drawing, and both take a click: a drag
-selects, `<C-c>` copies to the system clipboard, and the wheel scrolls.
+selects, `<C-c>` copies to the system clipboard, and the wheel scrolls. Extra
+clicks extend the selection the way the manual says — double takes the word under
+the pointer (or, on a bracket, everything up to its pair), triple takes the line,
+quadruple takes a rectangular block — and a drag after a double click takes whole
+words, until the button comes up.
 
 Not implemented: `\zs` and `\ze` in a pattern — refused rather than
-mistranslated — and double-click word selection. [`docs/roadmap.md`](docs/roadmap.md)
-lists the rest, with what each thing would have to respect.
+mistranslated. [`docs/roadmap.md`](docs/roadmap.md) lists the rest, with what each
+thing would have to respect.
 
 ## Build and run
 

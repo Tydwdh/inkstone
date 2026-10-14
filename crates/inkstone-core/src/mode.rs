@@ -35,7 +35,7 @@ impl Mode {
 /// cosmetic: an operator on a linewise selection takes the terminators with it,
 /// exactly as `dd` does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VisualKind {
+pub(crate) enum VisualKind {
     /// From one character to another, inclusive.
     Charwise,
     /// Whole lines, terminators and all.
@@ -60,7 +60,9 @@ impl VisualKind {
     ///
     /// A block is neither of the two, and `v` on one is vim's way back to
     /// characters — which is why the answer for it is not a swap.
-    pub fn toggled(self) -> Self {
+    /// Only the tests ask this; `v` and `<C-v>` do their own switching.
+    #[cfg(test)]
+    pub(crate) fn toggled(self) -> Self {
         match self {
             VisualKind::Charwise => VisualKind::Linewise,
             VisualKind::Linewise => VisualKind::Charwise,

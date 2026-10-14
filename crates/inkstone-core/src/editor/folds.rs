@@ -10,7 +10,7 @@ impl Editor {
     /// A fold of one line is not a fold: there is nothing to hide. Folds are kept
     /// sorted by where they start, which is what lets the drawing walk them in
     /// order.
-    pub fn fold_lines(&mut self, from: usize, to: usize) -> bool {
+    pub(crate) fn fold_lines(&mut self, from: usize, to: usize) -> bool {
         let last = self.buffer.line_count().saturating_sub(1);
         let (start, end) = (from.min(last), to.min(last));
         if end <= start {
@@ -44,7 +44,7 @@ impl Editor {
     /// reasoning that an open fold is not in the way — the test's trace showed what
     /// that costs: with the only fold before the cursor open, `zk` said there was no
     /// fold at all.)
-    pub fn goto_next_fold(&mut self, count: usize) -> bool {
+    pub(crate) fn goto_next_fold(&mut self, count: usize) -> bool {
         let row = self.cursor.row;
         let mut target = None;
         for _ in 0..count.max(1) {
@@ -73,7 +73,7 @@ impl Editor {
     }
 
     /// The same backwards — `zk`.
-    pub fn goto_previous_fold(&mut self, count: usize) -> bool {
+    pub(crate) fn goto_previous_fold(&mut self, count: usize) -> bool {
         let row = self.cursor.row;
         let mut target = None;
         for _ in 0..count.max(1) {
@@ -103,7 +103,7 @@ impl Editor {
 
     /// Whether a blockwise selection is being made, which is the one place the
     /// cursor may go past the end of a line.
-    pub fn is_making_a_block(&self) -> bool {
+    pub(crate) fn is_making_a_block(&self) -> bool {
         self.mode == Mode::Visual
             && self
                 .selection
@@ -115,7 +115,7 @@ impl Editor {
     /// Vim keeps views in `~/.vim/view` under a mangled name; this keeps them in the
     /// config directory under the file's own name and a hash of its full path, so
     /// that two files called `main.rs` in different projects do not share one.
-    pub fn view_path(&self) -> Option<PathBuf> {
+    pub(crate) fn view_path(&self) -> Option<PathBuf> {
         let name = self.buffer.path()?;
         let dir = match &self.view_dir {
             Some(dir) => dir.clone(),
@@ -139,7 +139,7 @@ impl Editor {
 
     /// Write this window's view — its folds and where the cursor is — to the file
     /// `:loadview` reads.
-    pub fn make_view(&mut self) -> std::io::Result<()> {
+    pub(crate) fn make_view(&mut self) -> std::io::Result<()> {
         let Some(path) = self.view_path() else {
             self.message = "E474: No file name, so nowhere to keep a view".to_string();
             return Ok(());
@@ -165,7 +165,7 @@ impl Editor {
     }
 
     /// Read a view back: the folds and the position it had.
-    pub fn load_view(&mut self) -> std::io::Result<()> {
+    pub(crate) fn load_view(&mut self) -> std::io::Result<()> {
         let Some(path) = self.view_path() else {
             self.message = "E474: No file name, so nowhere to look for a view".to_string();
             return Ok(());
@@ -228,7 +228,7 @@ impl Editor {
     /// being edited, and the alternative is walking the whole buffer per character.
     /// (The *line numbers* of existing folds are kept up to date by every edit, so a
     /// fold made this way does not drift.)
-    pub fn compute_indent_folds(&mut self) -> usize {
+    pub(crate) fn compute_indent_folds(&mut self) -> usize {
         let options = self.options.borrow().clone();
         let tabstop = options.tabstop.max(1);
         let ignore: Vec<char> = options.foldignore.chars().collect();
@@ -300,7 +300,7 @@ impl Editor {
 
     /// Whether the folds are worked out from the indent, which is what `zx` asks
     /// about and what `:set foldmethod=indent` turns on.
-    pub fn foldmethod_is_indent(&self) -> bool {
+    pub(crate) fn foldmethod_is_indent(&self) -> bool {
         self.options.borrow().foldmethod == crate::settings::FoldMethod::Indent
     }
 
@@ -308,7 +308,7 @@ impl Editor {
     ///
     /// Without levels the innermost is the smallest range, and a fold whose first
     /// line is the cursor's counts: that line is the one that is drawn.
-    pub fn fold_at_cursor(&self) -> Option<usize> {
+    pub(crate) fn fold_at_cursor(&self) -> Option<usize> {
         let row = self.cursor.row;
         self.folds
             .iter()
@@ -319,7 +319,7 @@ impl Editor {
     }
 
     /// Open or close the fold the cursor is in — `zo` and `zc`.
-    pub fn set_fold_closed(&mut self, closed: bool) -> bool {
+    pub(crate) fn set_fold_closed(&mut self, closed: bool) -> bool {
         let Some(index) = self.fold_at_cursor() else {
             self.message = "E490: No fold found".to_string();
             return false;
@@ -345,7 +345,7 @@ impl Editor {
     }
 
     /// Open or close every fold — `zR` and `zM`.
-    pub fn set_all_folds_closed(&mut self, closed: bool) -> bool {
+    pub(crate) fn set_all_folds_closed(&mut self, closed: bool) -> bool {
         if self.folds.is_empty() {
             self.message = "E490: No fold found".to_string();
             return false;
@@ -366,7 +366,7 @@ impl Editor {
     }
 
     /// Take away the fold the cursor is in — `zd`.
-    pub fn delete_fold_at_cursor(&mut self) -> bool {
+    pub(crate) fn delete_fold_at_cursor(&mut self) -> bool {
         let Some(index) = self.fold_at_cursor() else {
             self.message = "E490: No fold found".to_string();
             return false;
@@ -494,7 +494,7 @@ impl Editor {
     ///
     /// A fold's *level* is its nesting — the manual says so in as many words — and
     /// that is what `'foldlevel'` is compared against.
-    pub fn fold_depth(&self, index: usize) -> usize {
+    pub(crate) fn fold_depth(&self, index: usize) -> usize {
         let Some(fold) = self.folds.get(index).copied() else {
             return 0;
         };
@@ -508,7 +508,7 @@ impl Editor {
 
     /// Whether a fold is *drawn* closed: either it was closed, or it is nested
     /// deeper than `'foldlevel'` — which is what `zm` and `zr` move.
-    pub fn fold_is_shut(&self, index: usize) -> bool {
+    pub(crate) fn fold_is_shut(&self, index: usize) -> bool {
         fold_is_shut(&self.folds, self.options.borrow().foldlevel.0, index)
     }
 
@@ -516,7 +516,7 @@ impl Editor {
     ///
     /// Vim's `'foldlevel'`: a fold nested deeper than it is drawn as one line. Zero
     /// means "as the folds are", and `zR` is as open as it goes.
-    pub fn step_fold_level(&mut self, more: bool) -> bool {
+    pub(crate) fn step_fold_level(&mut self, more: bool) -> bool {
         if self.folds.is_empty() {
             self.message = "E490: No fold found".to_string();
             return false;
@@ -539,7 +539,7 @@ impl Editor {
     }
 
     /// Whether a line is hidden inside a closed fold.
-    pub fn line_is_folded(&self, row: usize) -> bool {
+    pub(crate) fn line_is_folded(&self, row: usize) -> bool {
         (0..self.folds.len()).any(|index| {
             self.fold_is_shut(index)
                 && row > self.folds[index].start
@@ -559,9 +559,37 @@ impl Editor {
             .map(|index| self.folds[index])
     }
 
+    /// The lines of the window that are drawn, from `top_line` on, for as many rows
+    /// as the caller has room for.
+    ///
+    /// A closed fold is one line — its first — and the rest of it is not there. This
+    /// is the whole of what folds do to drawing: the rows and the lines stop being
+    /// the same thing.
+    pub fn visible_lines(&self, top_line: usize, rows: usize) -> Vec<usize> {
+        let last = self.buffer.line_count().saturating_sub(1);
+        let mut out = Vec::with_capacity(rows);
+        let mut row = top_line.min(last);
+        while out.len() < rows && row <= last {
+            out.push(row);
+            // A closed fold takes its own range with it; anything else takes one
+            // line.
+            row = match self.closed_fold_at(row) {
+                Some(fold) => fold.end + 1,
+                None => row + 1,
+            };
+        }
+        out
+    }
+
+    /// How many *visible* lines there are from `top_line` to `row`, which is what
+    /// scrolling counts: a closed fold is one line and not the several it hides.
+    pub fn visible_rows_between(&self, top_line: usize, row: usize) -> usize {
+        let visible = self.visible_lines(top_line, self.buffer.line_count());
+        visible.iter().take_while(|line| **line < row).count()
+    }
     /// Put the cursor on a line that is on screen: a closed fold hides the lines
     /// after its first one, and a cursor inside one has nowhere to be.
-    pub fn settle_cursor(&mut self) {
+    pub(crate) fn settle_cursor(&mut self) {
         let came_from = self.last_cursor_row;
         self.settle_cursor_from(came_from);
     }
@@ -634,34 +662,5 @@ impl Editor {
         }
         // A fold of one line hides nothing, so the edit may have made one pointless.
         self.folds.retain(|fold| fold.end > fold.start);
-    }
-
-    /// The lines of the window that are drawn, from `top_line` on, for as many rows
-    /// as the caller has room for.
-    ///
-    /// A closed fold is one line — its first — and the rest of it is not there. This
-    /// is the whole of what folds do to drawing: the rows and the lines stop being
-    /// the same thing.
-    pub fn visible_lines(&self, top_line: usize, rows: usize) -> Vec<usize> {
-        let last = self.buffer.line_count().saturating_sub(1);
-        let mut out = Vec::with_capacity(rows);
-        let mut row = top_line.min(last);
-        while out.len() < rows && row <= last {
-            out.push(row);
-            // A closed fold takes its own range with it; anything else takes one
-            // line.
-            row = match self.closed_fold_at(row) {
-                Some(fold) => fold.end + 1,
-                None => row + 1,
-            };
-        }
-        out
-    }
-
-    /// How many *visible* lines there are from `top_line` to `row`, which is what
-    /// scrolling counts: a closed fold is one line and not the several it hides.
-    pub fn visible_rows_between(&self, top_line: usize, row: usize) -> usize {
-        let visible = self.visible_lines(top_line, self.buffer.line_count());
-        visible.iter().take_while(|line| **line < row).count()
     }
 }

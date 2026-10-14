@@ -155,7 +155,7 @@ impl Editor {
 
     /// Keep what the list has typed, and put it away. This is `<C-y>`, and with
     /// vim's completion it is usually nothing more than "stop".
-    pub fn accept_completion(&mut self) {
+    pub(crate) fn accept_completion(&mut self) {
         self.close_completion();
     }
 
@@ -166,7 +166,7 @@ impl Editor {
     /// fresh snippet is at zero and `<Tab>` goes to the first. Past the last
     /// stop there is nothing to step to, the session is over, and the key means
     /// what it always meant.
-    pub fn snippet_step(&mut self, forward: bool) -> bool {
+    pub(crate) fn snippet_step(&mut self, forward: bool) -> bool {
         if self.snippet_stops.is_empty() {
             return false;
         }
@@ -213,7 +213,7 @@ impl Editor {
     /// it move by however much the text grew or shrank, which is the whole
     /// complication: they are ranges, and a range is only true until the text in
     /// front of it changes.
-    pub fn snippet_choose(&mut self, forward: bool) -> bool {
+    pub(crate) fn snippet_choose(&mut self, forward: bool) -> bool {
         if self.snippet_stops.is_empty() {
             return false;
         }
@@ -328,7 +328,7 @@ impl Editor {
     }
 
     /// Forget a snippet session: leaving insert mode ends it.
-    pub fn end_snippet(&mut self) {
+    pub(crate) fn end_snippet(&mut self) {
         self.snippet_stops.clear();
         self.snippet_step = 0;
         self.snippet_choice = 0;
@@ -340,7 +340,7 @@ impl Editor {
 
     /// Put the list away and put back what was typed before it opened. This is
     /// `<C-e>`, the difference between "no thanks" and "not that one".
-    pub fn cancel_completion(&mut self) {
+    pub(crate) fn cancel_completion(&mut self) {
         let Some(state) = self.completion.as_ref() else {
             return;
         };
@@ -472,28 +472,9 @@ impl Editor {
         self.redraw = true;
     }
 
-    /// The diagnostic under the cursor, if one covers its line.
-    pub fn diagnostic_here(&self) -> Option<&Diagnostic> {
-        let row = self.cursor.row;
-        let col = self.cursor.col;
-        self.diagnostics
-            .iter()
-            .find(|diagnostic| match diagnostic.on_row(row) {
-                Some((from, to)) => col >= from && col < to.max(from + 1),
-                None => false,
-            })
-            .or_else(|| {
-                // Nothing under the cursor: the first one on its line, so that
-                // being on the line is enough to be told about it.
-                self.diagnostics
-                    .iter()
-                    .find(|diagnostic| diagnostic.on_row(row).is_some())
-            })
-    }
-
     /// Go to the next or previous diagnostic, wrapping around, and say what it
     /// is when we get there.
-    pub fn step_diagnostic(&mut self, forward: bool) -> bool {
+    pub(crate) fn step_diagnostic(&mut self, forward: bool) -> bool {
         if self.diagnostics.is_empty() {
             self.message = "No diagnostics".to_string();
             return false;

@@ -10,7 +10,7 @@ impl Editor {
     /// A characterwise selection includes the character the cursor is on; a
     /// linewise one covers whole lines, terminators and all, which is what makes
     /// `V` + `d` the same thing as `dd`.
-    pub fn visual_span(&self) -> Option<(usize, usize)> {
+    pub(crate) fn visual_span(&self) -> Option<(usize, usize)> {
         let selection = self.selection?;
         let anchor = selection.anchor.char_idx(&self.buffer);
         let cursor = self.cursor.char_idx(&self.buffer);
@@ -34,7 +34,7 @@ impl Editor {
     /// Rows are buffer rows and columns are *character* columns within each row,
     /// which is what the cursor counts here: a tab is one column, as it is
     /// everywhere else in this editor. `None` unless `<C-v>` is what selected.
-    pub fn visual_block(&self) -> Option<(usize, usize, usize, Option<usize>)> {
+    pub(crate) fn visual_block(&self) -> Option<(usize, usize, usize, Option<usize>)> {
         let selection = self.selection?;
         if selection.kind != VisualKind::Blockwise {
             return None;
@@ -77,7 +77,7 @@ impl Editor {
     }
 
     /// The character ranges a blockwise selection covers, one per row, in order.
-    pub fn block_spans(&self) -> Vec<(usize, usize)> {
+    pub(crate) fn block_spans(&self) -> Vec<(usize, usize)> {
         let Some((first, last, left, right)) = self.visual_block() else {
             return Vec::new();
         };
@@ -98,7 +98,7 @@ impl Editor {
     /// when each one starts after the last, and a block taken from the bottom up
     /// starts before it. Each row's offsets are worked out as the deletion
     /// reaches it, since every earlier deletion moved them.
-    pub fn cut_block(&mut self) -> (usize, usize) {
+    pub(crate) fn cut_block(&mut self) -> (usize, usize) {
         let Some((first, last, left, right)) = self.visual_block() else {
             return (self.cursor.row, self.cursor.col);
         };
@@ -120,7 +120,7 @@ impl Editor {
 
     /// Copy the blockwise selection into the register, and say where the cursor
     /// goes, the same way.
-    pub fn copy_block(&mut self) -> (usize, usize) {
+    pub(crate) fn copy_block(&mut self) -> (usize, usize) {
         let Some((first, last, left, right)) = self.visual_block() else {
             return (self.cursor.row, self.cursor.col);
         };

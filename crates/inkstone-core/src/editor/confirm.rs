@@ -10,7 +10,10 @@ impl Editor {
     /// while questions are up. `finish_confirm` closes it, so a `:s///c` is one
     /// `u` however many matches were answered — the same as a `:s` that never
     /// asked.
-    pub fn start_confirm(&mut self, spec: &Substitute) -> Result<(), crate::search::PatternError> {
+    pub(crate) fn start_confirm(
+        &mut self,
+        spec: &Substitute,
+    ) -> Result<(), crate::search::PatternError> {
         let pattern = regex::RegexBuilder::new(&spec.pattern)
             .case_insensitive(spec.ignore_case)
             .build()
@@ -67,7 +70,7 @@ impl Editor {
     }
 
     /// Answer the question that is up: `y`, `n`, `a`, `q`, `l`, or Escape.
-    pub fn answer_confirm(&mut self, answer: &str) {
+    pub(crate) fn answer_confirm(&mut self, answer: &str) {
         let Some((row, start, end, replacement)) =
             self.confirm.as_ref().and_then(|state| state.asking.clone())
         else {

@@ -239,7 +239,7 @@ impl Editor {
     ///
     /// Bytes exactly as the buffer has them, terminators included, so a linewise
     /// selection pastes as whole lines and a CRLF file copies CRLF.
-    pub fn text_for_clipboard(&self) -> String {
+    pub(crate) fn text_for_clipboard(&self) -> String {
         match self.visual_span() {
             Some((start, end)) => self.buffer.slice_text(start, end),
             None => self.register.text().to_string(),
@@ -279,14 +279,14 @@ impl Editor {
     /// with nothing after it. The nearest division that runs along the axis is
     /// the one that moves; a window with no such division is the whole of its
     /// rectangle and does not move at all.
-    pub fn resize_window(&mut self, axis: Axis, size: Resize) -> bool {
+    pub(crate) fn resize_window(&mut self, axis: Axis, size: Resize) -> bool {
         let window = self.current_window;
         self.resize_window_at(window, axis, size)
     }
 
     /// The same, for a window named rather than the one that is up: a dragged
     /// separator moves the window on one side of it.
-    pub fn resize_window_at(&mut self, window: usize, axis: Axis, size: Resize) -> bool {
+    pub(crate) fn resize_window_at(&mut self, window: usize, axis: Axis, size: Resize) -> bool {
         let Some(path) = layout_path(&self.layout, window) else {
             return false;
         };
@@ -334,13 +334,13 @@ impl Editor {
     }
 
     /// Give every window in this tab its equal share again.
-    pub fn equalize_windows(&mut self) {
+    pub(crate) fn equalize_windows(&mut self) {
         clear_sizes(&mut self.layout);
         self.redraw = true;
     }
 
     /// Close every window but this one.
-    pub fn close_other_windows(&mut self) {
+    pub(crate) fn close_other_windows(&mut self) {
         self.save_window();
         self.save_document();
         let kept = self.windows[self.current_window].clone();
@@ -370,7 +370,7 @@ impl Editor {
     /// just left of a window that is not the first, and a horizontal one is the
     /// last row of a window that has another below it — which is also its status
     /// line, since a window keeps its own.
-    pub fn separator_at(&self, x: u16, y: u16) -> Option<Resizing> {
+    pub(crate) fn separator_at(&self, x: u16, y: u16) -> Option<Resizing> {
         let rects = self.window_rects();
         for (index, rect) in rects.iter().enumerate() {
             if rect.width == 0 || rect.height == 0 {
@@ -441,7 +441,7 @@ impl Editor {
     /// screen row — and stops `scrolloff` lines short of the edge, so the context
     /// the setting promises is kept even here. At the ends of the file the view
     /// does not move, and so neither does the cursor.
-    pub fn scroll_view_by(&mut self, lines: i64) {
+    pub(crate) fn scroll_view_by(&mut self, lines: i64) {
         let before = self.viewport.top_line;
         self.scroll_view(lines);
         let moved = self.viewport.top_line as i64 - before as i64;
@@ -471,7 +471,7 @@ impl Editor {
     /// `^`, `{letter}'` and the screen motions `H`/`M`/`L` all mean this rather
     /// than column zero: a line that is indented is *about* the text, and a
     /// cursor left in the indentation is not where a person meant to be.
-    pub fn move_to_first_non_blank(&mut self) {
+    pub(crate) fn move_to_first_non_blank(&mut self) {
         let row = self.cursor.row;
         let len = self.buffer.line_len(row);
         let line_start = self.buffer.line_col_to_char(row, 0);

@@ -15,7 +15,7 @@ impl Editor {
     /// The tree is walked with the whole screen at the root; a split hands its
     /// children equal shares of its rectangle along its axis, keeping one row
     /// or column for the separator between them.
-    pub fn window_rects(&self) -> Vec<Rect> {
+    pub(crate) fn window_rects(&self) -> Vec<Rect> {
         let mut rects = vec![Rect::default(); self.windows.len()];
         layout_rects(
             &self.layout,
@@ -60,7 +60,7 @@ impl Editor {
 
     /// Show the document at `index` in the window that is up. Its position is
     /// the window's, kept and clamped into the text that arrives.
-    pub fn show_document(&mut self, index: usize) -> bool {
+    pub(crate) fn show_document(&mut self, index: usize) -> bool {
         if index >= self.documents.len() || index == self.current_document() {
             return false;
         }
@@ -94,7 +94,7 @@ impl Editor {
     }
 
     /// Show the tab at `index`. Says whether anything changed.
-    pub fn switch_to_tab(&mut self, index: usize) -> bool {
+    pub(crate) fn switch_to_tab(&mut self, index: usize) -> bool {
         if index >= self.tabs.len() || index == self.current_tab {
             return false;
         }
@@ -111,7 +111,7 @@ impl Editor {
 
     /// Open a tab: one window on `document`, or on an empty file when nothing
     /// was named. The new tab becomes the current one, the way vim leaves it.
-    pub fn open_tab(&mut self, document: Option<usize>) -> usize {
+    pub(crate) fn open_tab(&mut self, document: Option<usize>) -> usize {
         self.save_window();
         self.save_document();
         self.save_tab();
@@ -134,7 +134,7 @@ impl Editor {
 
     /// Close the tab that is on screen. The last one is not closed: a session
     /// with no tab has nowhere to show anything.
-    pub fn close_tab(&mut self) -> bool {
+    pub(crate) fn close_tab(&mut self) -> bool {
         if self.tabs.len() < 2 {
             return false;
         }
@@ -153,7 +153,7 @@ impl Editor {
     }
 
     /// Show the next or previous tab, wrapping around.
-    pub fn step_tab(&mut self, step: isize) -> bool {
+    pub(crate) fn step_tab(&mut self, step: isize) -> bool {
         let count = self.tabs.len() as isize;
         if count < 2 {
             return false;
@@ -163,7 +163,7 @@ impl Editor {
     }
 
     /// Show the window at `index`. Says whether anything changed.
-    pub fn switch_to_window(&mut self, index: usize) -> bool {
+    pub(crate) fn switch_to_window(&mut self, index: usize) -> bool {
         if index >= self.windows.len() || index == self.current_window {
             return false;
         }
@@ -194,7 +194,7 @@ impl Editor {
     /// Open `path` as a document of its own and show it in the window that is
     /// up. The file is read first, so a path that is not there leaves the editor
     /// as it was.
-    pub fn open_file(&mut self, path: &Path) -> Result<(), BufferError> {
+    pub(crate) fn open_file(&mut self, path: &Path) -> Result<(), BufferError> {
         let buffer = Buffer::from_path(path)?;
         let language = Language::from_path(path);
         self.save_document();
@@ -219,7 +219,7 @@ impl Editor {
     ///
     /// This is what `:sp file` needs: the file has to join the list, and the
     /// window that asked for the split keeps what it had.
-    pub fn add_file(&mut self, path: &Path) -> Result<usize, BufferError> {
+    pub(crate) fn add_file(&mut self, path: &Path) -> Result<usize, BufferError> {
         let buffer = Buffer::from_path(path)?;
         let language = Language::from_path(path);
         self.documents.push(Document::new(buffer, language));
@@ -229,7 +229,7 @@ impl Editor {
     /// Split the window that is up along `axis`, showing `document` (or the
     /// same document as the window it came from) in the new one. The new window
     /// becomes the current one, the way vim leaves it.
-    pub fn split_window(&mut self, axis: Axis, document: Option<usize>) -> usize {
+    pub(crate) fn split_window(&mut self, axis: Axis, document: Option<usize>) -> usize {
         self.save_window();
         self.save_document();
         let beside = self.current_window;
@@ -259,7 +259,7 @@ impl Editor {
     /// Close the window at `index`. Closing the last window leaves an empty one
     /// behind, the way a window that has lost its file keeps its place on
     /// screen — the session quits by other means.
-    pub fn close_window(&mut self, index: usize) {
+    pub(crate) fn close_window(&mut self, index: usize) {
         // A window showing a *list* has no file behind it: the document was made
         // for the window, and closing the window is what takes it away. Without
         // this every list a session opened would stay in `documents` for the rest
@@ -318,7 +318,7 @@ impl Editor {
     }
 
     /// Close a document, and every window that was showing it.
-    pub fn close_document(&mut self, index: usize) {
+    pub(crate) fn close_document(&mut self, index: usize) {
         if self.current_document() == index {
             // The document is going: nothing keeps its state, and the live
             // window is one of the windows that goes with it.

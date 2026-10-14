@@ -50,15 +50,15 @@ impl Item {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stop {
     /// Where the stop's text is, in characters of the snippet's text.
-    pub span: (usize, usize),
+    pub(crate) span: (usize, usize),
     /// What may be typed there, first one first. Empty for a plain stop.
-    pub choices: Vec<String>,
+    pub(crate) choices: Vec<String>,
     /// Which stop this is: two stops with the same number are one place written
     /// twice, and what is typed in the first is what the others say.
     pub number: u32,
     /// Whether this is the second or later writing of its number — a place that
     /// follows another rather than one to type in.
-    pub mirror: bool,
+    pub(crate) mirror: bool,
 }
 
 /// A snippet written the way a language server writes one, read into the text to
@@ -242,7 +242,7 @@ fn read_snippet(
 
 /// Whether a character can be part of a word: the same rule `w` moves by, so a
 /// completion and a motion agree about where a word starts.
-pub fn is_word_char(c: char) -> bool {
+pub(crate) fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
@@ -252,7 +252,7 @@ pub fn is_word_char(c: char) -> bool {
 /// word being typed is the run of word characters ending right at the cursor,
 /// which is what makes a completion replace what has been typed and nothing
 /// else. Just after a space the word is empty and starts at the cursor.
-pub fn prefix_at(buffer: &crate::buffer::Buffer, at: usize) -> (usize, String) {
+pub(crate) fn prefix_at(buffer: &crate::buffer::Buffer, at: usize) -> (usize, String) {
     let mut start = at;
     while start > 0 {
         match buffer.char_at(start - 1) {
@@ -327,7 +327,7 @@ fn words_on(buffer: &crate::buffer::Buffer, line: usize) -> Vec<String> {
 }
 
 /// The items whose labels start with what has been typed, in the order they came.
-pub fn matching(items: &[Item], prefix: &str) -> Vec<Item> {
+pub(crate) fn matching(items: &[Item], prefix: &str) -> Vec<Item> {
     if prefix.is_empty() {
         return items.to_vec();
     }

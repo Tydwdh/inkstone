@@ -25,7 +25,6 @@ impl Editor {
         self.list_history.push(ListSnapshot {
             kind,
             places: self.places.clone(),
-            targets: self.list_targets.clone(),
         });
         if self.list_history.len() > 10 {
             self.list_history.remove(0);
@@ -34,7 +33,7 @@ impl Editor {
     }
 
     /// Show the list `step` older (`-1`) or newer (`+1`), if there is one.
-    pub fn walk_list_history(&mut self, step: isize) -> bool {
+    pub(crate) fn walk_list_history(&mut self, step: isize) -> bool {
         if self.list_history.is_empty() {
             self.message = "E776: No location list".to_string();
             return false;
@@ -69,7 +68,7 @@ impl Editor {
     /// Step through the places the last answer named, and go to the one that is
     /// reached. Past either end the walk stops rather than wrapping: a list has
     /// ends, and a person who walks off one wants to know.
-    pub fn walk_places(&mut self, forward: bool, count: usize) -> bool {
+    pub(crate) fn walk_places(&mut self, forward: bool, count: usize) -> bool {
         if self.places.is_empty() {
             self.message = "E776: No location list".to_string();
             return false;
@@ -99,7 +98,7 @@ impl Editor {
     }
 
     /// Come back to the selection the last visual mode had.
-    pub fn reselect(&mut self) -> bool {
+    pub(crate) fn reselect(&mut self) -> bool {
         let Some((selection, cursor)) = self.last_visual else {
             return false;
         };
@@ -127,7 +126,7 @@ impl Editor {
     /// what makes one usable. The lines that survive keep their *places* — the
     /// targets are filtered with them, since a list and where its lines go are one
     /// thing.
-    pub fn open_places_list_where(&mut self, filter: Option<&str>) {
+    pub(crate) fn open_places_list_where(&mut self, filter: Option<&str>) {
         if self.places.is_empty() {
             self.message = "E776: No location list".to_string();
             return;
@@ -175,7 +174,7 @@ impl Editor {
     /// The lines are the history as it is, oldest first, and `<CR>` runs the one
     /// the cursor is on: a command history is a list of things to *do again*,
     /// which is what makes it a list rather than a message.
-    pub fn open_history_window(&mut self, searches: bool) {
+    pub(crate) fn open_history_window(&mut self, searches: bool) {
         let history = if searches {
             &self.search_history
         } else {
@@ -212,7 +211,7 @@ impl Editor {
     /// line, and a person reading them wants to scroll. It is read-only for the
     /// same reason every other list is — a list that can be edited is a list that
     /// can lie about what it says. `:set {name}={value}` is how one is changed.
-    pub fn open_settings_window(&mut self) {
+    pub(crate) fn open_settings_window(&mut self) {
         let mut text = String::new();
         for setting in crate::settings::Setting::ALL.iter().copied() {
             text.push_str(&format!(
@@ -279,7 +278,7 @@ impl Editor {
 
     /// Go to the place the cursor's line names, when the document on screen is a
     /// list of places.
-    pub fn open_place_at_cursor(&mut self) {
+    pub(crate) fn open_place_at_cursor(&mut self) {
         // A history window is a list of things to do again rather than places to
         // go to, so `<CR>` runs the line the cursor is on — vim's `q:`.
         if matches!(self.list, Some(List::Commands) | Some(List::Searches)) {
@@ -330,13 +329,13 @@ impl Editor {
     /// The same shape the list of places has — a document whose lines are the
     /// list — because a diagnostic is a line of text with a place attached, which
     /// is what a list line is.
-    pub fn open_diagnostics_list(&mut self) {
+    pub(crate) fn open_diagnostics_list(&mut self) {
         self.open_diagnostics_list_where(None)
     }
 
     /// The same, with only the lines a pattern matches — `:lopen warning` is the
     /// list of warnings.
-    pub fn open_diagnostics_list_where(&mut self, filter: Option<&str>) {
+    pub(crate) fn open_diagnostics_list_where(&mut self, filter: Option<&str>) {
         // Every document that is open, not only the one on screen: a server says
         // what it thinks about each file it has been told about, and a person
         // wants to know where the work is.
@@ -418,7 +417,7 @@ impl Editor {
     }
 
     /// The places the last answer named, as one line, for `:clist`.
-    pub fn places_text(&self) -> String {
+    pub(crate) fn places_text(&self) -> String {
         if self.places.is_empty() {
             return "No location list".to_string();
         }

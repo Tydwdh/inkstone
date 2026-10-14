@@ -11,7 +11,7 @@
 //!
 //! # Lines
 //! A line is *content plus its terminator*, and the terminator is not part of
-//! the content: [`Buffer::line`] strips it and [`Buffer::line_terminator`]
+//! the content: `Buffer::line` strips it and `Buffer::line_terminator`
 //! returns it. A file written with CRLF therefore behaves exactly like one
 //! written with LF — `$`, `A`, `o` and `dd` all land where a user expects —
 //! while `Buffer::text` still returns the original bytes, so saving never
@@ -125,7 +125,11 @@ impl Buffer {
     /// A write is refused when the file on disk is not the one this buffer read:
     /// something else has written it, and the buffer's text is not what a person
     /// would expect to be replacing. `:w!` says they know, and writes anyway.
-    pub fn save_with(&mut self, path: Option<&Path>, force: bool) -> Result<PathBuf, BufferError> {
+    pub(crate) fn save_with(
+        &mut self,
+        path: Option<&Path>,
+        force: bool,
+    ) -> Result<PathBuf, BufferError> {
         let target = match path {
             Some(p) => p.to_path_buf(),
             None => self.path.clone().ok_or(BufferError::NoPath)?,
@@ -164,7 +168,7 @@ impl Buffer {
     }
 
     /// The text in the character range `[start, end)`, clamped to the buffer.
-    pub fn slice_text(&self, start: usize, end: usize) -> String {
+    pub(crate) fn slice_text(&self, start: usize, end: usize) -> String {
         let len = self.len_chars();
         let start = start.min(len);
         let end = end.clamp(start, len);
@@ -172,7 +176,7 @@ impl Buffer {
     }
 
     /// Length in characters, terminator included.
-    pub fn len_chars(&self) -> usize {
+    pub(crate) fn len_chars(&self) -> usize {
         self.rope.len_chars()
     }
 
@@ -184,7 +188,7 @@ impl Buffer {
     }
 
     /// The character at `idx`, or `None` past the end.
-    pub fn char_at(&self, idx: usize) -> Option<char> {
+    pub(crate) fn char_at(&self, idx: usize) -> Option<char> {
         self.rope.get_char(idx)
     }
 
@@ -194,13 +198,13 @@ impl Buffer {
     }
 
     /// The terminator of line `i`: `"\n"`, `"\r\n"`, `"\r"`, ... or `""`.
-    pub fn line_terminator(&self, i: usize) -> String {
+    pub(crate) fn line_terminator(&self, i: usize) -> String {
         let full = self.rope.line(i);
         full.slice(self.line(i).len_chars()..).to_string()
     }
 
     /// How many characters line `i`'s terminator takes.
-    pub fn line_terminator_len(&self, i: usize) -> usize {
+    pub(crate) fn line_terminator_len(&self, i: usize) -> usize {
         self.rope.line(i).len_chars() - self.line_len(i)
     }
 
@@ -210,7 +214,7 @@ impl Buffer {
     }
 
     /// Number of characters in line `i`, excluding the newline.
-    pub fn line_len(&self, i: usize) -> usize {
+    pub(crate) fn line_len(&self, i: usize) -> usize {
         self.line(i).len_chars()
     }
 
@@ -218,7 +222,7 @@ impl Buffer {
     ///
     /// A position inside a terminator reports as the end of its line, so a
     /// caller can never get a column past [`Buffer::line_len`].
-    pub fn char_to_line_col(&self, char_idx: usize) -> (usize, usize) {
+    pub(crate) fn char_to_line_col(&self, char_idx: usize) -> (usize, usize) {
         let len = self.len_chars();
         if len == 0 {
             return (0, 0);
@@ -249,7 +253,7 @@ impl Buffer {
 
     /// The characters in `[start, end)`, as a string. An end beyond the end of
     /// the buffer is clamped, the way [`Buffer::replace_range`] clamps.
-    pub fn text_range(&self, start: usize, end: usize) -> String {
+    pub(crate) fn text_range(&self, start: usize, end: usize) -> String {
         let len = self.len_chars();
         let start = start.min(len);
         let end = end.clamp(start, len);
@@ -263,7 +267,7 @@ impl Buffer {
     /// step that takes the last terminator is put back by a removal followed by
     /// an insertion, and a buffer that repaired its newline in between would
     /// come back with one newline too many.
-    pub fn replace_range(&mut self, start: usize, end: usize, text: &str) {
+    pub(crate) fn replace_range(&mut self, start: usize, end: usize, text: &str) {
         let len = self.len_chars();
         let start = start.min(len);
         let end = end.clamp(start, len);
@@ -281,7 +285,7 @@ impl Buffer {
     /// Used where a cursor sits *before* something — `p` puts its text after the
     /// character under the cursor, and a wide grapheme is one character with two
     /// cells in it.
-    pub fn next_grapheme_boundary(&self, char_idx: usize) -> usize {
+    pub(crate) fn next_grapheme_boundary(&self, char_idx: usize) -> usize {
         let len = self.len_chars();
         let idx = char_idx.min(len);
         if idx >= len {
@@ -296,7 +300,7 @@ impl Buffer {
     }
 
     /// The character index of the grapheme boundary strictly before `char_idx`.
-    pub fn prev_grapheme_boundary(&self, char_idx: usize) -> usize {
+    pub(crate) fn prev_grapheme_boundary(&self, char_idx: usize) -> usize {
         let idx = char_idx.min(self.len_chars());
         if idx == 0 {
             return 0;

@@ -61,14 +61,14 @@ mod visual;
 mod windows;
 
 /// Guard against a Lua command calling itself forever.
-pub const MAX_COMMAND_DEPTH: usize = 100;
+pub(crate) const MAX_COMMAND_DEPTH: usize = 100;
 
 /// How many lines one notch of the wheel scrolls the view.
-pub const MOUSE_SCROLL_LINES: i64 = 3;
+pub(crate) const MOUSE_SCROLL_LINES: i64 = 3;
 
 /// How many digits a count may have. Long enough for any count a person types,
 /// short enough that a leaned-on key cannot overflow one.
-pub const MAX_COUNT_DIGITS: usize = 9;
+pub(crate) const MAX_COUNT_DIGITS: usize = 9;
 
 /// What the line at the bottom of the screen is asking for.
 ///
@@ -76,7 +76,7 @@ pub const MAX_COUNT_DIGITS: usize = 9;
 /// thing to type into: a line with a cursor, a backspace and an escape. Only the
 /// first character differs, and what running it means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Prompt {
+pub(crate) enum Prompt {
     /// `:` — a command.
     Command,
     /// `/` — a search, forwards.
@@ -96,7 +96,7 @@ impl Prompt {
     }
 
     /// Which way a search entered at this prompt runs.
-    pub fn direction(self) -> Option<Direction> {
+    pub(crate) fn direction(self) -> Option<Direction> {
         match self {
             Prompt::Command => None,
             Prompt::SearchForward => Some(Direction::Forward),
@@ -124,15 +124,15 @@ struct IncSearch {
 
 /// A visual selection: `v` or `V` was pressed, and the cursor is one end of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Selection {
+pub(crate) struct Selection {
     /// Where the selection started.
-    pub anchor: Cursor,
+    pub(crate) anchor: Cursor,
     /// Whether it covers characters or whole lines.
     pub kind: VisualKind,
     /// A blockwise selection whose right edge is the end of each line rather than
     /// a column: `<C-v>$` makes a *ragged* block, which is what `d` on it means —
     /// "from here to the end of every line", not "this many columns".
-    pub to_end: bool,
+    pub(crate) to_end: bool,
 }
 
 /// The operator a `d`, `y` or `c` started, waiting for the motion it works on.
@@ -140,7 +140,7 @@ pub struct Selection {
 /// What a macro key is waiting for: `q` for a register to record into (or to stop
 /// recording), and `@` for one to play.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MacroAsk {
+pub(crate) enum MacroAsk {
     /// `q` — the next key names the register to record into, or ends the recording.
     Record,
     /// `@` — the next key names the register to play.
@@ -150,7 +150,7 @@ pub enum MacroAsk {
 /// How an operator's motion was forced to behave, by `v`, `V` or `<C-v>` typed
 /// after the operator — vim's `o_v`, `o_V` and `o_CTRL-V`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ForcedShape {
+pub(crate) enum ForcedShape {
     /// `v`: characters, whatever the motion was. A linewise motion becomes
     /// *exclusive*; a characterwise one has its inclusive/exclusive the other way
     /// round — which is what makes `dvj` and `dv$` do what they say.
@@ -196,7 +196,7 @@ impl Operator {
     /// The two differ only in where the range comes from, so an operator forced
     /// to be blockwise (`d<C-V>`) makes a selection out of the rectangle and runs
     /// this — the same code every other block operator goes through.
-    pub fn visual_command(self) -> &'static str {
+    pub(crate) fn visual_command(self) -> &'static str {
         match self {
             Operator::Delete => "delete_visual",
             Operator::Yank => "yank_visual",
@@ -247,7 +247,7 @@ impl Operator {
     }
 
     /// The command for the doubled key: `dd`, `yy`, `cc`.
-    pub fn line_command(self) -> &'static str {
+    pub(crate) fn line_command(self) -> &'static str {
         match self {
             Operator::Delete => "delete_line",
             Operator::Yank => "yank_line",
@@ -290,30 +290,30 @@ pub struct Document {
     /// The search that is up in it, matches and all.
     pub search: Search,
     /// What has been coloured in it, and the per-line state that needed.
-    pub highlighter: LineStates,
+    pub(crate) highlighter: LineStates,
     /// What a language server said about it, in the order it said it.
     pub diagnostics: Vec<Diagnostic>,
     /// The selection the last visual mode had, and where its cursor was.
-    pub last_visual: Option<(Selection, Cursor)>,
+    pub(crate) last_visual: Option<(Selection, Cursor)>,
     /// Where insert mode was last left.
-    pub insert_again_at: Option<Cursor>,
+    pub(crate) insert_again_at: Option<Cursor>,
     /// What this document is a list of, if it is one rather than a file. Such a
     /// document is shown but not edited: its lines *are* the list, and changing
     /// them would leave the list and the screen saying different things.
     pub list: Option<List>,
     /// Where each of its lines goes, in order.
-    pub list_targets: Vec<(PathBuf, usize, usize)>,
+    pub(crate) list_targets: Vec<(PathBuf, usize, usize)>,
     /// Where the marks are. A mark is a place in the text, so it stays with the
     /// text, and switching files takes it off the screen and brings it back.
-    pub marks: Marks,
+    pub(crate) marks: Marks,
     /// The places this file has been looked at from: what `<C-o>` and `<C-i>`
     /// walk, and what `''` asks for.
-    pub jumps: Jumps,
+    pub(crate) jumps: Jumps,
     /// Where the last jump started, which is what `''` and `` `` `` come back
     /// to — one place, so pressing one of them twice comes back again.
-    pub jump_from: Option<Cursor>,
+    pub(crate) jump_from: Option<Cursor>,
     /// The places edits happened: what `g;` and `g,` walk.
-    pub changes: Changes,
+    pub(crate) changes: Changes,
 }
 
 impl Document {
@@ -359,13 +359,11 @@ impl Document {
 
 /// A list this session has shown: what it was, and what it pointed at.
 #[derive(Debug, Clone)]
-pub struct ListSnapshot {
+pub(crate) struct ListSnapshot {
     /// Which kind of list it was.
     pub kind: List,
     /// The places it named, for `:cnext` to walk when it is shown again.
     pub places: Vec<(PathBuf, usize, usize)>,
-    /// Where each of its lines went.
-    pub targets: Vec<(PathBuf, usize, usize)>,
 }
 
 /// Whether a row of a list is one the filter keeps: the row's number, and the
@@ -400,9 +398,9 @@ pub struct Window {
     /// Where the cursor is in it.
     pub cursor: Cursor,
     /// The first buffer line on screen.
-    pub top_line: usize,
+    pub(crate) top_line: usize,
     /// The first visible column of each line.
-    pub left_col: usize,
+    pub(crate) left_col: usize,
     /// The folds of this window. Vim keeps them per window — the same file can be
     /// folded one way in one window and another way in the next — and so does this.
     pub folds: Vec<Fold>,
@@ -427,7 +425,7 @@ impl Window {
 /// rule must be the same in both: the drawing asks it per line, and the kernel asks it
 /// for `zo`, `zc` and the cursor. The first version of this had the rule in the kernel
 /// and a stale copy in the renderer, and the smoke showed a level that closed nothing.
-pub fn fold_is_shut(folds: &[Fold], foldlevel: usize, index: usize) -> bool {
+pub(crate) fn fold_is_shut(folds: &[Fold], foldlevel: usize, index: usize) -> bool {
     let Some(fold) = folds.get(index) else {
         return false;
     };
@@ -460,15 +458,15 @@ pub struct Fold {
 /// `:sort i` to ignore case and `:sort u` to keep one of each — and they can be
 /// written together, which is why this is a struct and not a bool each.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SortSpec {
+pub(crate) struct SortSpec {
     /// Sort the other way round.
     pub reverse: bool,
     /// Compare the numbers in the lines rather than the text.
-    pub numeric: bool,
+    pub(crate) numeric: bool,
     /// Compare without case.
-    pub ignore_case: bool,
+    pub(crate) ignore_case: bool,
     /// Keep one line of each, comparing the way the sort does.
-    pub unique: bool,
+    pub(crate) unique: bool,
 }
 
 impl SortSpec {
@@ -510,7 +508,7 @@ const MAX_CONFIRM_STEPS: usize = 10_000;
 /// The matches are found one row at a time, and the search inside a row carries
 /// on from where the last answer left it — which is what keeps a replacement
 /// containing the pattern from being found again and again.
-pub struct Confirming {
+pub(crate) struct Confirming {
     spec: Substitute,
     pattern: regex::Regex,
     /// The rows to look at, in order.
@@ -532,7 +530,7 @@ pub struct Confirming {
 
 impl Confirming {
     /// The message that asks the question about the match in hand.
-    pub fn prompt(&self) -> String {
+    pub(crate) fn prompt(&self) -> String {
         match &self.asking {
             Some((_, _, _, replacement)) => {
                 format!("replace with {replacement} (y/n/a/q/l)?")
@@ -545,7 +543,7 @@ impl Confirming {
 /// Which half of a text object a key asked for: `i` for the inside, `a` for the
 /// inside and whatever surrounds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Object {
+pub(crate) enum Object {
     /// `i` — the object itself.
     Inner,
     /// `a` — the object and the whitespace or brackets around it.
@@ -576,7 +574,7 @@ impl Tab {
 
 /// Which way a split divides its rectangle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Axis {
+pub(crate) enum Axis {
     /// One above the other: `:sp`.
     Rows,
     /// Side by side: `:vs`.
@@ -590,7 +588,7 @@ pub enum Axis {
 /// carries a size — every frame divides the screen again, so a resize is free
 /// and there is nothing to keep up to date.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Layout {
+pub(crate) enum Layout {
     /// One window.
     Leaf(usize),
     /// Windows divided along an axis, in order.
@@ -681,7 +679,7 @@ fn pending_find(pending: &str) -> Option<&'static str> {
 
 /// A rectangle of the screen, in cells.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Rect {
+pub(crate) struct Rect {
     /// Column of the left edge.
     pub x: u16,
     /// Row of the top edge.
@@ -892,7 +890,7 @@ const COMPLETION_LIMIT: usize = 200;
 
 /// A separator being dragged with the pointer.
 #[derive(Debug, Clone, Copy)]
-pub struct Resizing {
+pub(crate) struct Resizing {
     /// The window being made bigger or smaller.
     window: usize,
     /// Which way its size is measured.
@@ -988,63 +986,63 @@ pub struct Editor {
     pub documents: Vec<Document>,
     /// The label of the item a language server should be asked about, when the
     /// list has moved to one.
-    pub completion_resolve: Option<String>,
+    pub(crate) completion_resolve: Option<String>,
     /// The stops of a snippet that has been typed, as buffer ranges and what may
     /// be typed in each, and which one the cursor is on. `<Tab>` steps through
     /// them, `<C-n>` picks another of what a stop allows, and a session ends when
     /// there are no places left.
-    pub snippet_stops: Vec<completion::Stop>,
+    pub(crate) snippet_stops: Vec<completion::Stop>,
     /// Which of the current stop's choices is the one in the text.
-    pub snippet_choice: usize,
+    pub(crate) snippet_choice: usize,
     /// Whether a mirror is being written right now, so that the edit it makes
     /// does not come back through the same path.
-    pub snippet_mirrors_busy: bool,
+    pub(crate) snippet_mirrors_busy: bool,
     /// Which stop the cursor is on.
-    pub snippet_step: usize,
+    pub(crate) snippet_step: usize,
     /// What is waiting for a mark's letter: `m`, `` ` `` or `'` has been typed
     /// and the letter has not. While this is set, no other key means anything.
-    pub mark_prefix: Option<MarkJump>,
+    pub(crate) mark_prefix: Option<MarkJump>,
     /// Where the marks are, for the document on screen.
-    pub marks: Marks,
+    pub(crate) marks: Marks,
     /// The jump list of the document on screen.
-    pub jumps: Jumps,
+    pub(crate) jumps: Jumps,
     /// Where the last jump started, for the document on screen.
-    pub jump_from: Option<Cursor>,
+    pub(crate) jump_from: Option<Cursor>,
     /// The change list of the document on screen.
-    pub changes: Changes,
+    pub(crate) changes: Changes,
     /// The selection the last visual mode had, and where its cursor was: what
     /// `gv` comes back to.
-    pub last_visual: Option<(Selection, Cursor)>,
+    pub(crate) last_visual: Option<(Selection, Cursor)>,
     /// Where insert mode was last left: what `gi` goes back to. (The *text* of
     /// the last insert session is a different field, and belongs to `.`.)
-    pub insert_again_at: Option<Cursor>,
+    pub(crate) insert_again_at: Option<Cursor>,
     /// A keyboard macro being recorded: `q{reg}` starts one and `q` ends it. The
     /// keys are kept as they are spelled (`<C-a>`, not a control byte), which is
     /// what makes playing one back the same as typing it.
-    pub recording: Option<(char, String)>,
+    pub(crate) recording: Option<(char, String)>,
     /// The macros themselves, by register letter: what `@{letter}` plays.
     pub macros: [Option<String>; 26],
     /// The register `@` was last given, which is what `@@` plays.
-    pub last_macro: Option<char>,
+    pub(crate) last_macro: Option<char>,
     /// What `q` or `@` is waiting for. It is *not* a second pending mechanism: it
     /// is what the keymap's own pending state means when the key that follows is
     /// one the table cannot name — a register letter, which is any letter.
-    pub macro_ask: Option<MacroAsk>,
+    pub(crate) macro_ask: Option<MacroAsk>,
     /// Whether the keys being handled are a macro's, which is what keeps a
     /// replayed key out of the recording that is running.
-    pub replaying: bool,
+    pub(crate) replaying: bool,
     /// How an operator's motion was forced to behave, and where the cursor was
     /// when it was forced: `v`, `V` and `<C-v>` after an operator — vim's `o_v`,
     /// `o_V` and `o_CTRL-V`. The cursor is one corner of a block; the other two
     /// only need the shape.
-    pub forced_shape: Option<(ForcedShape, Cursor)>,
+    pub(crate) forced_shape: Option<(ForcedShape, Cursor)>,
     /// Where the cursor was before the last edit, which is what tells a fold which
     /// way the cursor was going when it landed inside one.
-    pub last_cursor_row: usize,
+    pub(crate) last_cursor_row: usize,
     /// Where `:mkview` writes and `:loadview` reads. `None` means the platform's
     /// config directory, and the tests point it somewhere of their own so that a
     /// test never writes into a person's config.
-    pub view_dir: Option<PathBuf>,
+    pub(crate) view_dir: Option<PathBuf>,
     /// The folds as they were after each step of the history, so that an undo takes a
     /// fold back with the text it was on.
     ///
@@ -1052,7 +1050,7 @@ pub struct Editor {
     /// character ranges. So this is a second stack, kept in step with the history's
     /// own count — truncated to it on every edit and pushed to — and `undo` and `redo`
     /// read it at the step they land on.
-    pub fold_states: Vec<Vec<Fold>>,
+    pub(crate) fold_states: Vec<Vec<Fold>>,
     /// The folds of the window that is up. They belong to the *window* — the same
     /// file can be folded one way in one and another way in the next — so they are
     /// saved and loaded with the rest of a window's state.
@@ -1062,21 +1060,21 @@ pub struct Editor {
     ///
     /// This is *not* per document, and deliberately: it lasts as long as the
     /// insert session, and a session cannot outlive a switch to another document.
-    pub block_insert: Option<(Vec<Cursor>, usize)>,
+    pub(crate) block_insert: Option<(Vec<Cursor>, usize)>,
     /// What the document on screen is a *list* of, if it is one rather than a
     /// file: a list is shown in a window of its own, and it is not for editing.
     pub list: Option<List>,
     /// Where each line of that list goes, in order — which is what `<CR>` reads.
     /// It belongs to the list rather than to the session, since two lists can be
     /// open at once.
-    pub list_targets: Vec<(PathBuf, usize, usize)>,
+    pub(crate) list_targets: Vec<(PathBuf, usize, usize)>,
     /// The lists this session has shown, oldest first, and which one is on screen.
     /// `:colder` and `:cnewer` walk it, which is what makes a narrowed list
     /// something a person can come back from.
-    pub list_history: Vec<ListSnapshot>,
+    pub(crate) list_history: Vec<ListSnapshot>,
     /// Which of them the walk is on, counting from one, and zero when there are
     /// none.
-    pub list_index: usize,
+    pub(crate) list_index: usize,
     /// The places the last question named — references or symbols — and where the
     /// walk through them is. They are across files, so this belongs to the
     /// session rather than to any one document.
@@ -1086,19 +1084,19 @@ pub struct Editor {
     /// The mark a key has named and a command has not read yet: `` `a `` hands
     /// the letter to the command it runs, but `d`a` runs the *motion* by name,
     /// so the letter waits here the way a find's character does.
-    pub last_mark: Option<(char, MarkJump)>,
+    pub(crate) last_mark: Option<(char, MarkJump)>,
     /// Every window, and how they tile the screen. The one on screen is
     /// `windows[current_window]`, whose fields are a placeholder while it is.
     pub windows: Vec<Window>,
     /// How the windows are laid out.
-    pub layout: Layout,
+    pub(crate) layout: Layout,
     /// Which window that is.
-    pub current_window: usize,
+    pub(crate) current_window: usize,
     /// Every tab page. The one on screen is `tabs[current_tab]`, whose state is
     /// the `windows`/`layout`/`current_window` above while it is.
-    pub tabs: Vec<Tab>,
+    pub(crate) tabs: Vec<Tab>,
     /// Which tab that is.
-    pub current_tab: usize,
+    pub(crate) current_tab: usize,
     /// The document.
     pub buffer: Buffer,
     /// Where we are in it.
@@ -1110,28 +1108,28 @@ pub struct Editor {
     /// Which part of the document is on screen.
     pub viewport: Viewport,
     /// The line being typed at the bottom: a `:` command or a `/` search.
-    pub cmdline: String,
+    pub(crate) cmdline: String,
     /// Where the cursor is in that line, as a character index.
-    pub cmdline_cursor: usize,
+    pub(crate) cmdline_cursor: usize,
     /// `:` lines that have been run, oldest first, for `Up`.
-    pub command_history: Vec<String>,
+    pub(crate) command_history: Vec<String>,
     /// `/` and `?` patterns, kept apart from the commands the way vim keeps
     /// them.
-    pub search_history: Vec<String>,
+    pub(crate) search_history: Vec<String>,
     /// Which line of the history `Up`/`Down` is showing, if any.
-    pub prompt_index: Option<usize>,
+    pub(crate) prompt_index: Option<usize>,
     /// What was being typed when `Up` was first pressed, so `Down` can bring it
     /// back.
-    pub prompt_draft: String,
+    pub(crate) prompt_draft: String,
     /// What that line is for, which is what the prompt character says.
-    pub prompt: Prompt,
+    pub(crate) prompt: Prompt,
     /// Transient status message shown on the bottom row.
     pub message: String,
     /// The built-in commands.
-    pub registry: CommandRegistry,
+    pub(crate) registry: CommandRegistry,
     /// What keys do. Shared with the Lua host, so a script can remap at any
     /// time.
-    pub keymap: Rc<RefCell<Keymap>>,
+    pub(crate) keymap: Rc<RefCell<Keymap>>,
     /// Settings, shared with the Lua host for the same reason.
     pub options: Rc<RefCell<Options>>,
     /// Keys of a partially-typed multi-key binding (`d` waiting for `d`).
@@ -1142,36 +1140,36 @@ pub struct Editor {
     /// mapping — at which point they are typed after all, in order. Nothing is
     /// lost and nothing arrives twice; a key that cannot start a mapping is
     /// typed straight away, so ordinary typing stays immediate.
-    pub insert_pending: Vec<KeyMsg>,
+    pub(crate) insert_pending: Vec<KeyMsg>,
     /// Digits typed before a command, which become its repeat count. `3x`,
     /// `2dd`, `5j`: the count is passed to the command as its first parameter,
     /// which is what the command `count()` already reads.
-    pub pending_count: String,
+    pub(crate) pending_count: String,
     /// The operator a `d`, `y` or `c` started, waiting for its motion.
     pub operator: Option<Operator>,
     /// Which half of a text object is being asked for, while the key that names
     /// the object is still to come: `di` then `w`, `ca` then `"`.
-    pub object: Option<Object>,
+    pub(crate) object: Option<Object>,
     /// How many times the pending operator repeats, so `2d3w` is six words.
-    pub operator_count: usize,
+    pub(crate) operator_count: usize,
     /// What the last yank or delete put aside, for `p` and `P`.
     pub register: Register,
     /// Every register a `"` can name: the letters, `"0`, the delete history,
     /// the black hole and the clipboard.
-    pub registers: Registers,
+    pub(crate) registers: Registers,
     /// A `"` that has been typed and the register it names, if the name has
     /// come: `"ayy` is `Prefix::Named('a')` by the time `yy` runs.
-    pub register_prefix: Prefix,
+    pub(crate) register_prefix: Prefix,
     /// The character a find is looking for, and which way it looks. `;` and `,`
     /// use it again, and so do `df,` and `.` after it.
-    pub last_find: Option<(char, crate::command::Find)>,
+    pub(crate) last_find: Option<(char, crate::command::Find)>,
     /// The last `:s` line that was run, for `&` to run again on the line the
     /// cursor is on.
-    pub last_substitute: Option<Substitute>,
+    pub(crate) last_substitute: Option<Substitute>,
     /// A `:s///c` waiting for an answer about a match.
-    pub confirm: Option<Confirming>,
+    pub(crate) confirm: Option<Confirming>,
     /// A separator being dragged, if one is.
-    pub resizing: Option<Resizing>,
+    pub(crate) resizing: Option<Resizing>,
     /// The completion popup, while it is up.
     pub completion: Option<Completion>,
     /// A question for a language server, if one is waiting to be asked.
@@ -1179,14 +1177,14 @@ pub struct Editor {
     /// The kernel does not know about servers: it leaves the question here and
     /// carries on with what it can answer itself, and a session that has a
     /// server takes the question and asks it.
-    pub lsp_ask: Option<Ask>,
+    pub(crate) lsp_ask: Option<Ask>,
     /// The last command that changed something, with the arguments it was run
     /// with: `.` runs it again.
-    pub last_command: Option<(String, Vec<Param>)>,
+    pub(crate) last_command: Option<(String, Vec<Param>)>,
     /// The text the insert session of that change typed, in the order it was
     /// typed, with a backspace and a delete as tokens of their own. `.` types it
     /// again after running the command.
-    pub last_insert: Option<String>,
+    pub(crate) last_insert: Option<String>,
     /// What the insert session that is open has typed so far. `Some` only while
     /// one is being recorded, which is from entering insert mode by a command to
     /// leaving it.
@@ -1195,10 +1193,10 @@ pub struct Editor {
     /// whether it covers characters or whole lines. The cursor is its moving
     /// end. A mouse drag makes the same thing, so a selection is a selection
     /// however it was made.
-    pub selection: Option<Selection>,
+    pub(crate) selection: Option<Selection>,
     /// Whether the pointer has dragged since it was pressed, which is what tells
     /// a click from a drag.
-    pub mouse_dragged: bool,
+    pub(crate) mouse_dragged: bool,
     /// How many clicks in a row the press that is in progress was: what it
     /// selected (a word, a line, a block) and what a drag from it extends by.
     pointer_clicks: u8,
@@ -1215,7 +1213,7 @@ pub struct Editor {
     pub diagnostics: Vec<Diagnostic>,
     /// The syntax colours, and the per-line state they need: what a line starts
     /// in depends on every line above it, so the answers are cached.
-    pub highlighter: LineStates,
+    pub(crate) highlighter: LineStates,
     /// Set by a command that wants the session to end; the daemon turns it
     /// into an [`inkstone_rpc::ServerMsg::Quit`].
     pub should_quit: bool,
@@ -1331,7 +1329,7 @@ impl Editor {
 
     /// A default editor with no Lua config, for tests.
     #[cfg(test)]
-    pub fn for_tests() -> Self {
+    pub(crate) fn for_tests() -> Self {
         Self::new(None).expect("editor construction cannot fail without a config file")
     }
 

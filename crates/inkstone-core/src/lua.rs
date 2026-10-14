@@ -19,7 +19,7 @@
 //! A Rust-side editor cannot be borrowed by a Lua callback that is itself
 //! running *inside* a command (`Editor` owns the `Lua`, so the borrows would
 //! alias). `ed.run` therefore pushes onto a queue that
-//! [`Editor::run_command`](crate::Editor::run_command) drains once the Lua
+//! `Editor::run_command` drains once the Lua
 //! call returns. Nesting is bounded by `MAX_COMMAND_DEPTH`.
 
 use std::cell::RefCell;
@@ -82,31 +82,33 @@ impl LuaHost {
     }
 
     /// Source a file as Lua.
-    pub fn load_init(&self, path: &Path) -> Result<(), CoreError> {
+    pub(crate) fn load_init(&self, path: &Path) -> Result<(), CoreError> {
         let source = std::fs::read_to_string(path)?;
         self.load_str(&path.to_string_lossy(), &source)
     }
 
     /// Evaluate Lua source, with `name` used in error messages.
-    pub fn load_str(&self, name: &str, source: &str) -> Result<(), CoreError> {
+    pub(crate) fn load_str(&self, name: &str, source: &str) -> Result<(), CoreError> {
         self.lua.load(source).set_name(name).exec()?;
         Ok(())
     }
 
     /// Whether a Lua command with this name exists.
-    pub fn has_command(&self, name: &str) -> bool {
+    pub(crate) fn has_command(&self, name: &str) -> bool {
         self.commands.borrow().contains_key(name)
     }
 
     /// The names of every command registered from Lua.
-    pub fn command_names(&self) -> Vec<String> {
+    /// Only the tests ask this, to see what a script registered.
+    #[cfg(test)]
+    pub(crate) fn command_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self.commands.borrow().keys().cloned().collect();
         names.sort();
         names
     }
 
     /// Call a Lua command. Anything it asks to run is queued, not executed.
-    pub fn call_command(&self, name: &str, params: &[Param]) -> Result<(), CoreError> {
+    pub(crate) fn call_command(&self, name: &str, params: &[Param]) -> Result<(), CoreError> {
         let function = match self.commands.borrow().get(name).cloned() {
             Some(f) => f,
             None => return Err(CoreError::Message(format!("unknown Lua command: {name}"))),

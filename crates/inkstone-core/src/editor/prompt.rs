@@ -156,7 +156,7 @@ impl Editor {
     /// An empty pattern repeats the last search, which is what `/` then
     /// `<Enter>` means in vim; with nothing to repeat it says so rather than
     /// doing nothing quietly.
-    pub fn run_search(&mut self, pattern: &str, direction: Direction) {
+    pub(crate) fn run_search(&mut self, pattern: &str, direction: Direction) {
         let ignore_case = self.options.borrow().ignorecase;
         if pattern.is_empty() {
             if self.search.is_empty() {

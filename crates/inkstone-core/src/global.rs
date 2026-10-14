@@ -20,17 +20,17 @@ use crate::substitute::{address_range, strip_range, Address, SubstituteError};
 
 /// A `:g` or `:v` line, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Global {
+pub(crate) struct Global {
     /// What a line has to match — or, for `:v`, has not to match.
-    pub pattern: String,
+    pub(crate) pattern: String,
     /// The command to run on each matching line, empty for the default `p`.
     pub command: String,
     /// `:v` rather than `:g`: run on the lines that do *not* match.
-    pub invert: bool,
+    pub(crate) invert: bool,
     /// Where the search starts, if the line named one.
-    pub from: Option<Address>,
+    pub(crate) from: Option<Address>,
     /// Where it ends.
-    pub to: Option<Address>,
+    pub(crate) to: Option<Address>,
 }
 
 impl Global {
@@ -39,7 +39,7 @@ impl Global {
     /// It is one when it is an address, a `g` or a `v`, and a delimiter — so
     /// `:g/text/d` is a global while `:goto` is a command name that happens to
     /// start with a `g`, and `:vsplit` one that starts with a `v`.
-    pub fn looks_like(line: &str) -> bool {
+    pub(crate) fn looks_like(line: &str) -> bool {
         // A line with no address at all is the common case, and `strip_range` is
         // written for `:s`, whose range is optional in the same way: it hands
         // back the line itself when there is nothing to strip.

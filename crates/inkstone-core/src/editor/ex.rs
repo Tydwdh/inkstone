@@ -18,7 +18,7 @@ impl Editor {
     /// on a line of its own rather than broken, and `textwidth = 0` is not a
     /// width at all — the command then does nothing, which is what "do not wrap"
     /// has to mean.
-    pub fn format_lines(&mut self, from: usize, to: usize) -> usize {
+    pub(crate) fn format_lines(&mut self, from: usize, to: usize) -> usize {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -182,7 +182,7 @@ impl Editor {
     /// first and the last of them: a substitute is one change, so one `u` undoes
     /// one, however many lines it touched. The lines between them ride along
     /// unchanged, which is the price of a single step and a small one.
-    pub fn substitute(
+    pub(crate) fn substitute(
         &mut self,
         spec: &Substitute,
     ) -> Result<(usize, usize), crate::search::PatternError> {
@@ -250,7 +250,7 @@ impl Editor {
     ///
     /// A mark that was never set has no line of its own, and a range that names
     /// one falls back to the cursor's line rather than 0 or the end.
-    pub fn resolve_address(&self, address: Address) -> usize {
+    pub(crate) fn resolve_address(&self, address: Address) -> usize {
         let last = self.buffer.line_count().saturating_sub(1);
         match address {
             Address::Line(number) => number.saturating_sub(1).min(last),
@@ -270,7 +270,7 @@ impl Editor {
     /// The second address defaults to the first, which is what `:5d` means, and
     /// to the last line when the first is the cursor's — `:.` is one line, and
     /// vim's `:.` is the same. A `:` with no range at all is `None`.
-    pub fn resolve_range(&self, line: &str) -> Option<(usize, usize)> {
+    pub(crate) fn resolve_range(&self, line: &str) -> Option<(usize, usize)> {
         let (from, to) = crate::substitute::address_range(line);
         let from = from?;
         let from = self.resolve_address(from);
@@ -284,7 +284,7 @@ impl Editor {
     /// terminator included, which is added if it was the last line and had none
     /// — so that what is read comes in as lines of its own rather than joined to
     /// what was there.
-    pub fn read_file_below(&mut self, path: &Path) -> Result<usize, BufferError> {
+    pub(crate) fn read_file_below(&mut self, path: &Path) -> Result<usize, BufferError> {
         // Unlike `:e`, a file that is not there is an error: `:read` is about
         // what is in a file, and there is nothing in this one.
         if !path.exists() {
@@ -319,7 +319,7 @@ impl Editor {
     /// so the file's line endings survive and the whole thing is one step to
     /// undo — and the cursor goes to the first line of it, which is where a
     /// person looks afterwards.
-    pub fn sort_lines(&mut self, from: usize, to: usize, spec: &SortSpec) -> usize {
+    pub(crate) fn sort_lines(&mut self, from: usize, to: usize, spec: &SortSpec) -> usize {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -749,7 +749,7 @@ impl Editor {
     /// not move the ones above it. A command that prints is served by the message
     /// row's one line rather than by running it per line: the matching lines are
     /// collected into that line, the way `:diagnostics` lists what it has.
-    pub fn run_global(&mut self, spec: &crate::global::Global) {
+    pub(crate) fn run_global(&mut self, spec: &crate::global::Global) {
         let pattern = match regex::RegexBuilder::new(&spec.pattern).build() {
             Ok(pattern) => pattern,
             Err(error) => {

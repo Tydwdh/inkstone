@@ -60,7 +60,7 @@ impl Keymap {
     }
 
     /// The built-in vim-like bindings.
-    pub fn with_defaults() -> Self {
+    pub(crate) fn with_defaults() -> Self {
         let mut km = Self::new();
         let normal: &[(&str, &[&str])] = &[
             ("h", &["move_left"]),
@@ -271,7 +271,7 @@ impl Keymap {
     /// them after all when they are not.
     ///
     /// Returns an error when `lhs` is not valid key notation.
-    pub fn bind(
+    pub(crate) fn bind(
         &mut self,
         mode: Mode,
         lhs: &str,
@@ -313,7 +313,10 @@ impl Keymap {
     }
 
     /// Every binding, for introspection and tests.
-    pub fn bindings(&self) -> Vec<(Mode, String, Vec<String>)> {
+    /// Only the README-table test asks for this: the map is otherwise a lookup
+    /// table, not a list.
+    #[cfg(test)]
+    pub(crate) fn bindings(&self) -> Vec<(Mode, String, Vec<String>)> {
         let mut out: Vec<_> = self
             .maps
             .iter()
@@ -334,7 +337,7 @@ impl Keymap {
 /// character it looks like. That is the difference between `:normal A <` (two
 /// characters) and `:normal A <Esc>` (a character and a key), and it is why this
 /// is not simply [`parse_key`], which fails on the first stray angle bracket.
-pub fn parse_normal_keys(argument: &str) -> Vec<KeyMsg> {
+pub(crate) fn parse_normal_keys(argument: &str) -> Vec<KeyMsg> {
     let mut keys = Vec::new();
     let mut chars = argument.chars().peekable();
     while let Some(c) = chars.next() {
@@ -375,7 +378,7 @@ pub fn parse_normal_keys(argument: &str) -> Vec<KeyMsg> {
 /// `<Esc>`, `<C-w>v`. Every name in angle brackets is a key; anything else is one
 /// character per key. A name that is not one of them is an error here, which is
 /// what makes this the wrong reader for a `:` line — see
-/// [`parse_normal_keys`] for the one that takes a person's word for it.
+/// `parse_normal_keys` for the one that takes a person's word for it.
 pub fn parse_key(s: &str) -> Result<Vec<KeyMsg>, KeyParseError> {
     let mut keys = Vec::new();
     let mut chars = s.chars().peekable();
@@ -497,7 +500,7 @@ pub fn encode_key(key: &KeyMsg) -> String {
 }
 
 /// The canonical notation for a sequence of keys, as used by the keymap keys.
-pub fn encode_sequence(keys: &[KeyMsg]) -> String {
+pub(crate) fn encode_sequence(keys: &[KeyMsg]) -> String {
     keys.iter()
         .map(encode_key)
         .collect::<Vec<_>>()

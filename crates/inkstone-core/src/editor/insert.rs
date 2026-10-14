@@ -13,7 +13,7 @@ impl Editor {
     /// the log: what `.` repeats is the text, typed where the cursor is now. A
     /// session that was a paste, or one whose text came from an input method,
     /// repeats the same way a typed one does.
-    pub fn replay_insert(&mut self, log: &str) {
+    pub(crate) fn replay_insert(&mut self, log: &str) {
         if self.mode != Mode::Insert {
             self.mode = Mode::Insert;
         }
@@ -42,7 +42,7 @@ impl Editor {
     /// each, or `None` for the end of the line, and `pad` says whether a row that
     /// does not reach `col` is padded out to it (which is what `A` does, and what
     /// `I` and `c` do not: `v_b_I` leaves a short line unmodified).
-    pub fn start_block_insert(&mut self, rows: Vec<usize>, col: Option<usize>, pad: bool) {
+    pub(crate) fn start_block_insert(&mut self, rows: Vec<usize>, col: Option<usize>, pad: bool) {
         let mut cursors = Vec::new();
         for row in rows {
             let len = self.buffer.line_len(row);
@@ -275,7 +275,7 @@ impl Editor {
     }
 
     /// Go back to where insert mode was last left, and insert there.
-    pub fn insert_again(&mut self) -> bool {
+    pub(crate) fn insert_again(&mut self) -> bool {
         let Some(cursor) = self.insert_again_at else {
             return false;
         };

@@ -52,26 +52,29 @@ impl Cursor {
         Self { row, col }
     }
 
-    /// Pull the cursor back inside the buffer.
-    pub fn clamp(&mut self, buf: &Buffer) {
+    /// Pull the cursor back inside the buffer. Only a test asks for this: the
+    /// editor clamps through its own `clamp_cursor`, which also knows about
+    /// folds and the window's scroll position.
+    #[cfg(test)]
+    pub(crate) fn clamp(&mut self, buf: &Buffer) {
         self.row = self.row.min(buf.line_count().saturating_sub(1));
         self.col = self.col.min(buf.line_len(self.row));
     }
 
     /// The character index of this cursor within the buffer.
-    pub fn char_idx(&self, buf: &Buffer) -> usize {
+    pub(crate) fn char_idx(&self, buf: &Buffer) -> usize {
         buf.line_col_to_char(self.row, self.col)
     }
 
     /// Move to a character index, clamping it into the buffer.
-    pub fn set_char_idx(&mut self, buf: &Buffer, char_idx: usize) {
+    pub(crate) fn set_char_idx(&mut self, buf: &Buffer, char_idx: usize) {
         let (row, col) = buf.char_to_line_col(char_idx);
         self.row = row;
         self.col = col;
     }
 
     /// One column left, wrapping to the end of the line above.
-    pub fn move_left(&mut self, buf: &Buffer) {
+    pub(crate) fn move_left(&mut self, buf: &Buffer) {
         if self.col > 0 {
             self.col -= 1;
         } else if self.row > 0 {
@@ -91,7 +94,7 @@ impl Cursor {
     }
 
     /// One line up, clamping the column to the shorter line.
-    pub fn move_up(&mut self, buf: &Buffer) {
+    pub(crate) fn move_up(&mut self, buf: &Buffer) {
         if self.row > 0 {
             self.row -= 1;
             self.col = self.col.min(buf.line_len(self.row));
@@ -99,7 +102,7 @@ impl Cursor {
     }
 
     /// One line down, clamping the column to the shorter line.
-    pub fn move_down(&mut self, buf: &Buffer) {
+    pub(crate) fn move_down(&mut self, buf: &Buffer) {
         if self.row + 1 < buf.line_count() {
             self.row += 1;
             self.col = self.col.min(buf.line_len(self.row));
@@ -107,18 +110,18 @@ impl Cursor {
     }
 
     /// To the first column of the current line.
-    pub fn move_line_start(&mut self, _buf: &Buffer) {
+    pub(crate) fn move_line_start(&mut self, _buf: &Buffer) {
         self.col = 0;
     }
 
     /// Move to the last character of the line (vim's `$`), or column 0 on an
     /// empty line.
-    pub fn move_line_end(&mut self, buf: &Buffer) {
+    pub(crate) fn move_line_end(&mut self, buf: &Buffer) {
         self.col = buf.line_len(self.row).saturating_sub(1);
     }
 
     /// Move to the start of the next word (vim's `w`).
-    pub fn move_word_forward(&mut self, buf: &Buffer) {
+    pub(crate) fn move_word_forward(&mut self, buf: &Buffer) {
         let len = buf.len_chars();
         if len == 0 {
             return;
@@ -155,7 +158,7 @@ impl Cursor {
     }
 
     /// Move to the start of the current or previous word (vim's `b`).
-    pub fn move_word_backward(&mut self, buf: &Buffer) {
+    pub(crate) fn move_word_backward(&mut self, buf: &Buffer) {
         let mut idx = self.char_idx(buf);
         if idx == 0 {
             return;
@@ -191,13 +194,13 @@ impl Cursor {
     }
 
     /// Move to the last line's start (vim's `G`).
-    pub fn goto_last_line(&mut self, buf: &Buffer) {
+    pub(crate) fn goto_last_line(&mut self, buf: &Buffer) {
         self.row = buf.line_count().saturating_sub(1);
         self.col = 0;
     }
 
     /// To the start of the first line (vim's `gg`).
-    pub fn goto_first_line(&mut self, _buf: &Buffer) {
+    pub(crate) fn goto_first_line(&mut self, _buf: &Buffer) {
         self.row = 0;
         self.col = 0;
     }

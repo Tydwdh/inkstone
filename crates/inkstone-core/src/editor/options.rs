@@ -12,7 +12,7 @@ impl Editor {
     ///
     /// The value is read the way it reads in a script — `true`, `false`, a number
     /// — so the `:` line and `init.lua` cannot disagree about what a value means.
-    pub fn set_option(&mut self, setting: Setting, value: &str) -> Result<(), String> {
+    pub(crate) fn set_option(&mut self, setting: Setting, value: &str) -> Result<(), String> {
         let param = match value {
             "true" => Param::Bool(true),
             "false" => Param::Bool(false),
@@ -26,7 +26,7 @@ impl Editor {
 
     /// What an option is set to, for `:set {name}?` and for the message that
     /// follows a set.
-    pub fn option_text(&self, setting: Setting) -> String {
+    pub(crate) fn option_text(&self, setting: Setting) -> String {
         match self.options.borrow().get(setting) {
             Param::Bool(value) => value.to_string(),
             Param::Int(value) => value.to_string(),

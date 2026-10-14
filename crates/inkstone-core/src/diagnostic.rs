@@ -93,7 +93,7 @@ impl Diagnostic {
     /// A diagnostic that runs over several lines underlines the part of each.
     /// An empty one underlines the single character after its start, so that
     /// "this line is wrong" has something to show.
-    pub fn on_row(&self, row: usize) -> Option<(usize, usize)> {
+    pub(crate) fn on_row(&self, row: usize) -> Option<(usize, usize)> {
         if row < self.start.0 || row > self.end.0 {
             return None;
         }

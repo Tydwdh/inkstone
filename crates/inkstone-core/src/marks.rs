@@ -13,7 +13,7 @@ use crate::cursor::Cursor;
 /// How a mark is gone to: the exact place `` `a `` was put, or the first
 /// non-blank character of its line, which is what `'a` goes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarkJump {
+pub(crate) enum MarkJump {
     /// `m` — put a mark down rather than travelling to one.
     Set,
     /// `` ` `` — the character the mark was put on.
@@ -27,7 +27,7 @@ pub enum MarkJump {
 /// The array is fixed because the letters are: `a` is slot zero, and a mark
 /// nobody set is `None` rather than a default position that would look set.
 #[derive(Debug, Clone, Default)]
-pub struct Marks {
+pub(crate) struct Marks {
     slots: [Option<Cursor>; 26],
 }
 
@@ -60,7 +60,7 @@ impl Marks {
 
     /// Take every mark away, which is what `:delmarks!` does for the buffer
     /// that is on screen.
-    pub fn clear_all(&mut self) {
+    pub(crate) fn clear_all(&mut self) {
         self.slots = [None; 26];
     }
 

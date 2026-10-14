@@ -18,11 +18,11 @@ use crate::cursor::Cursor;
 /// How many changes are remembered. Vim's list is bounded too, by its
 /// `'undolevels'`-ish bookkeeping rather than a number; a hundred is enough to
 /// walk back through a session's work.
-pub const MAX_CHANGES: usize = 100;
+pub(crate) const MAX_CHANGES: usize = 100;
 
 /// The places edits happened, oldest first.
 #[derive(Debug, Clone, Default)]
-pub struct Changes {
+pub(crate) struct Changes {
     places: Vec<Cursor>,
     /// Which entry the walk is on: the most recent change, until `g;` moves it.
     index: usize,
@@ -34,7 +34,7 @@ impl Changes {
     /// A place already in the list is moved to the end instead of being added
     /// again, so that a line typed into is one entry; anything ahead of the walk
     /// is dropped, since editing from there makes a new list from there.
-    pub fn record(&mut self, cursor: Cursor) {
+    pub(crate) fn record(&mut self, cursor: Cursor) {
         if let Some(at) = self.places.iter().position(|place| place.row == cursor.row) {
             self.places.remove(at);
         }

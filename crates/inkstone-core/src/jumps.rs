@@ -16,11 +16,11 @@ use crate::cursor::Cursor;
 
 /// How many places are remembered. Vim keeps a hundred, and the oldest are the
 /// ones nobody misses.
-pub const MAX_JUMPS: usize = 100;
+pub(crate) const MAX_JUMPS: usize = 100;
 
 /// The places a document has been looked at from, and where in them the walk is.
 #[derive(Debug, Clone, Default)]
-pub struct Jumps {
+pub(crate) struct Jumps {
     places: Vec<Cursor>,
     /// Which entry is the one being walked from. Entries after it are the way
     /// forward and are dropped when a new jump is made from somewhere else.
@@ -33,7 +33,7 @@ impl Jumps {
     /// This is called *before* the cursor moves, with where it is now, and
     /// truncates whatever was ahead: a jump made from the middle of the list
     /// starts a new history there, the way an undo does.
-    pub fn record(&mut self, cursor: Cursor) {
+    pub(crate) fn record(&mut self, cursor: Cursor) {
         if self.places.get(self.index) == Some(&cursor) {
             return;
         }

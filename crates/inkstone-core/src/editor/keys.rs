@@ -44,7 +44,7 @@ impl Editor {
 
     /// Open the fold the cursor's line is in, if a closed one is: what insert mode
     /// needs, and what a person asking to type on a folded line means.
-    pub fn open_fold_under_cursor(&mut self) {
+    pub(crate) fn open_fold_under_cursor(&mut self) {
         let row = self.cursor.row;
         let Some(index) = (0..self.folds.len()).find(|index| {
             let fold = self.folds[*index];
@@ -62,7 +62,7 @@ impl Editor {
     }
 
     /// Run a named command, then drain anything Lua queued while running it.
-    pub fn run_command(&mut self, name: &str, params: &[Param]) {
+    pub(crate) fn run_command(&mut self, name: &str, params: &[Param]) {
         let name = name.to_string();
         // One command is one step in the history — a counted `3x` is a single
         // change to a user — and so is a whole insert session. The two nest:
@@ -885,7 +885,7 @@ impl Editor {
     /// Forget a half-typed command: the pending keys, the count and the
     /// operator. Called whenever the mode changes, so `d` then Escape leaves
     /// nothing behind.
-    pub fn clear_pending(&mut self) {
+    pub(crate) fn clear_pending(&mut self) {
         // What a mode was doing is remembered here, where a mode *stops*: the
         // last selection is what `gv` comes back to, and the last place insert
         // mode was is what `gi` does. Both are per document, and both are read

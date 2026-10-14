@@ -72,7 +72,7 @@ impl Language {
     }
 
     /// Whether this language colours anything.
-    pub fn is_plain(self) -> bool {
+    pub(crate) fn is_plain(self) -> bool {
         self == Language::Plain
     }
 }
@@ -96,18 +96,18 @@ pub enum Token {
 
 /// One coloured stretch of a line, in character columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
+pub(crate) struct Span {
     /// The first character of the stretch.
     pub start: usize,
     /// One past its last character.
     pub end: usize,
     /// What it is.
-    pub token: Token,
+    pub(crate) token: Token,
 }
 
 /// Where a line starts, which is what the line above decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct State {
+pub(crate) struct State {
     /// How many block comments are open. Rust's nest, C's do not, so this is
     /// more than one only in Rust.
     comment: usize,
@@ -142,7 +142,7 @@ pub struct State {
 
 /// The language a `<script>` or `<style>` holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Inner {
+pub(crate) enum Inner {
     /// A `<script>`: the C family's grammar, which is what JavaScript and
     /// TypeScript are here.
     Script,
@@ -233,7 +233,9 @@ impl State {
     }
 
     /// Whether this state is plain code: nothing is carried over.
-    pub fn is_code(&self) -> bool {
+    /// Only the tests ask this: the highlighter itself keeps the state opaque.
+    #[cfg(test)]
+    pub(crate) fn is_code(&self) -> bool {
         self.comment == 0
             && self.raw.is_none()
             && self.triple.is_none()
@@ -267,7 +269,7 @@ pub fn style(token: Token) -> (Color, u16) {
 /// cached, filled lazily down to whatever line is asked for, and thrown away
 /// from the first line an edit could have changed.
 #[derive(Debug)]
-pub struct LineStates {
+pub(crate) struct LineStates {
     language: Cell<Language>,
     /// The state each computed line *ends* in, so the next line starts in it.
     states: RefCell<Vec<State>>,
@@ -282,13 +284,8 @@ impl LineStates {
         }
     }
 
-    /// The language being coloured.
-    pub fn language(&self) -> Language {
-        self.language.get()
-    }
-
     /// Colour a different language from now on: a different document.
-    pub fn set_language(&mut self, language: Language) {
+    pub(crate) fn set_language(&mut self, language: Language) {
         self.language.set(language);
         self.states.borrow_mut().clear();
     }
@@ -298,7 +295,7 @@ impl LineStates {
     /// Nothing above a change can start differently because of it, which is what
     /// makes this cheap. Merging a line into the one above invalidates from the
     /// upper line, and the caller passes the earlier of the two.
-    pub fn invalidate(&self, line: usize) {
+    pub(crate) fn invalidate(&self, line: usize) {
         self.states.borrow_mut().truncate(line);
     }
 
@@ -332,7 +329,7 @@ impl LineStates {
 }
 
 /// The coloured spans of one line, and the state the next line starts in.
-pub fn tokens(language: Language, line: &str, state: State) -> (Vec<Span>, State) {
+pub(crate) fn tokens(language: Language, line: &str, state: State) -> (Vec<Span>, State) {
     match language {
         Language::Plain => (Vec::new(), State::new()),
         Language::Rust => scan(line, state, &RUST),

@@ -12,15 +12,15 @@ use crate::cursor::Cursor;
 
 /// Rows reserved at the bottom of the screen: one status line and one
 /// command/message line.
-pub const CHROME_ROWS: u16 = 2;
+pub(crate) const CHROME_ROWS: u16 = 2;
 
 /// The visible window onto the buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Viewport {
     /// Index of the first visible buffer line.
-    pub top_line: usize,
+    pub(crate) top_line: usize,
     /// Character offset of the first visible column (horizontal scroll).
-    pub left_col: usize,
+    pub(crate) left_col: usize,
     /// Terminal width in columns.
     pub width: u16,
     /// Terminal height in rows.
@@ -46,7 +46,7 @@ impl Viewport {
     }
 
     /// Rows available for text.
-    pub fn text_rows(&self) -> u16 {
+    pub(crate) fn text_rows(&self) -> u16 {
         self.height.saturating_sub(CHROME_ROWS)
     }
 }

@@ -38,7 +38,7 @@ pub struct View<'a> {
     pub mode: Mode,
     /// The visual selection, as a character range `[start, end)`, if one is up.
     /// It is what the highlight is for.
-    pub selection: Option<(usize, usize)>,
+    pub(crate) selection: Option<(usize, usize)>,
     /// A blockwise selection, as rows and character columns — the shape a
     /// rectangle cannot be said in one character range. `selection` is `None`
     /// while this is `Some`: they are two ways of saying where the highlight is.
@@ -49,31 +49,31 @@ pub struct View<'a> {
     /// How deep the folds are shown closed — `'foldlevel'`, which `zm` and `zr`
     /// move. A fold nested deeper than it is drawn shut even when it is not closed
     /// by hand.
-    pub foldlevel: usize,
+    pub(crate) foldlevel: usize,
     /// Every search match in the document, in order. The ones on screen are
     /// highlighted.
     pub matches: &'a [(usize, usize)],
     /// The one match the cursor is inside, if any: it is highlighted more
     /// strongly, because it is the one `n` would move off.
-    pub current_match: Option<(usize, usize)>,
+    pub(crate) current_match: Option<(usize, usize)>,
     /// Whether a search being typed is showing its match right now — the cursor
     /// belongs to that match, not to the line the pattern is being typed on.
-    pub incsearch: bool,
+    pub(crate) incsearch: bool,
     /// The syntax colours, or `None` when highlighting is off. It is asked for
     /// the spans of a line at a time, and remembers what it worked out.
-    pub highlighter: Option<&'a crate::highlight::LineStates>,
+    pub(crate) highlighter: Option<&'a crate::highlight::LineStates>,
     /// Which part of the buffer, and of each line, is on screen.
     pub viewport: Viewport,
     /// Where each window is, in cells. Empty means one window over the whole
     /// screen, which is what a caller that has no windows to speak of wants.
-    pub rects: Vec<crate::editor::Rect>,
+    pub(crate) rects: Vec<crate::editor::Rect>,
     /// Every open document, for the panes that are not the current one. The
     /// document the current window shows is `buffer`, live.
     pub documents: &'a [crate::editor::Document],
     /// Every window, in the same order as `rects`.
     pub windows: &'a [crate::editor::Window],
     /// Which of them is on screen: the only one that draws a cursor.
-    pub current_window: usize,
+    pub(crate) current_window: usize,
     /// What a language server said about the document on screen.
     pub diagnostics: &'a [crate::diagnostic::Diagnostic],
     /// The completion popup, if it is up: what to offer and which is picked.
@@ -90,10 +90,10 @@ pub struct View<'a> {
     pub status: String,
     /// Command-line buffer, shown while in [`Mode::Command`]: the prompt
     /// character and the line being typed.
-    pub cmdline: Option<String>,
+    pub(crate) cmdline: Option<String>,
     /// Where the cursor is in that line's *text*, as a character index (the
     /// prompt character is not part of it).
-    pub cmdline_cursor: Option<usize>,
+    pub(crate) cmdline_cursor: Option<usize>,
     /// Transient message, shown on the last row outside command mode.
     pub message: String,
 }
@@ -507,7 +507,7 @@ fn draw_separators(grid: &mut Grid, panes: &[Pane<'_>], vp: Viewport) {
 ///
 /// The window the position is in comes back with it, so a click in another
 /// window can be answered by going there first.
-pub fn position_at(view: &View<'_>, x: u16, y: u16) -> Option<(usize, Cursor)> {
+pub(crate) fn position_at(view: &View<'_>, x: u16, y: u16) -> Option<(usize, Cursor)> {
     let vp = view.viewport;
     if vp.width == 0 || vp.height == 0 {
         return None;
@@ -625,7 +625,7 @@ fn digits(n: usize) -> usize {
 ///
 /// The single source of truth: both the renderer and the scroll maths use it,
 /// so the cursor cannot end up in a column the gutter has taken.
-pub fn gutter_width(line_count: usize, number: bool) -> u16 {
+pub(crate) fn gutter_width(line_count: usize, number: bool) -> u16 {
     if number {
         (digits(line_count) + 1) as u16
     } else {

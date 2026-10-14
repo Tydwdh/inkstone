@@ -42,7 +42,7 @@ pub enum CommandError {
 ///
 /// Plain functions, not closures, which is why the registry stays a table a script
 /// layer can enumerate and dispatch into.
-pub type CommandFn = fn(&mut Editor, &[Param]) -> Result<()>;
+pub(crate) type CommandFn = fn(&mut Editor, &[Param]) -> Result<()>;
 
 /// The set of built-in commands.
 #[derive(Debug, Clone)]
@@ -306,7 +306,7 @@ impl CommandRegistry {
 /// count of a billion would otherwise be a billion trips round a loop: the cap
 /// makes `999999999j` behave like `100000j`, which is already further than any
 /// buffer goes.
-pub const MAX_COUNT: usize = 100_000;
+pub(crate) const MAX_COUNT: usize = 100_000;
 
 /// The repeat count for a command: the first integer parameter, if positive.
 fn count(params: &[Param]) -> usize {
@@ -367,7 +367,7 @@ fn move_right(editor: &mut Editor, params: &[Param]) -> Result<()> {
 /// Which way a character find looks, and whether it lands on the character or
 /// next to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Find {
+pub(crate) enum Find {
     /// `f` — on the character, looking forward.
     Forward,
     /// `F` — on it, looking back.
@@ -547,7 +547,7 @@ pub(crate) fn bracket_at(buffer: &Buffer, row: usize, at: usize) -> Option<(usiz
 }
 
 /// Which kind of find a motion name is, if it is one.
-pub fn find_of(name: &str) -> Option<Find> {
+pub(crate) fn find_of(name: &str) -> Option<Find> {
     Some(match name {
         "find_forward" => Find::Forward,
         "find_backward" => Find::Backward,
@@ -2872,7 +2872,7 @@ fn matching_close(buffer: &Buffer, opener: usize, open: char, close: char) -> Op
 
 /// What a motion's range covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MotionKind {
+pub(crate) enum MotionKind {
     /// Characters, from within a line.
     Charwise,
     /// Whole lines, terminators and all.
@@ -2881,12 +2881,12 @@ pub enum MotionKind {
 
 /// A motion an operator can take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Motion {
+pub(crate) struct Motion {
     /// What the range the motion makes covers.
     pub kind: MotionKind,
     /// Whether the character the motion lands on is part of the range. Vim's
     /// `$` is inclusive; `l`, `w` and `b` are not.
-    pub inclusive: bool,
+    pub(crate) inclusive: bool,
 }
 
 /// The motions an operator takes, by the name of the command that performs them.
@@ -2895,7 +2895,7 @@ pub struct Motion {
 /// is what keeps `d` followed by `i` from entering insert mode. Motions are named
 /// by their commands, so a motion is reachable exactly where the keymap reaches
 /// it — including a user's remapping of `w` to something else.
-pub fn motion_of(name: &str) -> Option<Motion> {
+pub(crate) fn motion_of(name: &str) -> Option<Motion> {
     let charwise = |inclusive| Motion {
         kind: MotionKind::Charwise,
         inclusive,
@@ -2927,7 +2927,7 @@ pub fn motion_of(name: &str) -> Option<Motion> {
 }
 
 /// The motion a binding names, if it names exactly one.
-pub fn binding_motion(binding: &Binding) -> Option<&str> {
+pub(crate) fn binding_motion(binding: &Binding) -> Option<&str> {
     let mut commands = binding.commands.iter();
     let name = commands.next()?;
     if commands.next().is_some() {
@@ -3074,7 +3074,7 @@ fn yank_motion(editor: &mut Editor, params: &[Param]) -> Result<()> {
 
 /// What `g~`, `gu` and `gU` do to the text they take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CaseChange {
+pub(crate) enum CaseChange {
     /// Swap the case of every letter.
     Toggle,
     /// Make every letter lower case.

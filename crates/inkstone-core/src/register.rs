@@ -28,7 +28,7 @@
 use std::collections::HashMap;
 
 /// Whether a key names a register the editor keeps.
-pub fn is_register_name(c: char) -> bool {
+pub(crate) fn is_register_name(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '+' | '*')
 }
 
@@ -91,7 +91,7 @@ impl Register {
     }
 
     /// Whether this holds a rectangle.
-    pub fn is_blockwise(&self) -> bool {
+    pub(crate) fn is_blockwise(&self) -> bool {
         self.kind == Kind::Blockwise
     }
 
@@ -101,14 +101,14 @@ impl Register {
     }
 
     /// Whether this holds whole lines.
-    pub fn is_linewise(&self) -> bool {
+    pub(crate) fn is_linewise(&self) -> bool {
         self.kind == Kind::Linewise
     }
 }
 
 /// What a `"` was typed for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Prefix {
+pub(crate) enum Prefix {
     /// No `"` is outstanding. The unnamed register is the one in play.
     None,
     /// A `"` was typed and the name has not come yet.
@@ -123,7 +123,7 @@ pub enum Prefix {
 /// without being asked and the one every edit fills; this is everything a `"`
 /// can name.
 #[derive(Debug, Clone)]
-pub struct Registers {
+pub(crate) struct Registers {
     named: HashMap<char, Register>,
     last_yank: Register,
     clipboard: Register,
@@ -171,13 +171,13 @@ impl Registers {
     }
 
     /// Record a yank: `"0` always holds the last one.
-    pub fn note_yank(&mut self, register: &Register) {
+    pub(crate) fn note_yank(&mut self, register: &Register) {
         self.last_yank = register.clone();
     }
 
     /// Record a delete, shifting the numbered registers along: `"1` is the most
     /// recent, `"2` the one before it, and so on down to `"9`.
-    pub fn note_delete(&mut self, register: &Register) {
+    pub(crate) fn note_delete(&mut self, register: &Register) {
         if register.is_empty() {
             return;
         }
@@ -191,13 +191,15 @@ impl Registers {
 
     /// The clipboard, as far as the editor knows it. It is what a paste from the
     /// terminal put there, or what `"+y` last sent out.
+    /// Only the tests ask for the system clipboard's register by name.
+    #[cfg(test)]
     pub fn clipboard(&self) -> &Register {
         &self.clipboard
     }
 
     /// Take the clipboard as the frontend reported it: a bracketed paste *is*
     /// the system clipboard arriving, and `"+p` should be able to put it back.
-    pub fn set_clipboard(&mut self, text: impl Into<String>) {
+    pub(crate) fn set_clipboard(&mut self, text: impl Into<String>) {
         self.clipboard = Register::new(text, Kind::Charwise);
     }
 

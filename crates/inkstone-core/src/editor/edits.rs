@@ -15,7 +15,13 @@ impl Editor {
     /// `after` is `None`; either way [`Editor::after_edit`] clamps it
     /// afterwards. Every edit a command makes goes through here, which is what
     /// keeps the history and the buffer in step.
-    pub fn replace_range(&mut self, start: usize, end: usize, text: &str, after: Option<usize>) {
+    pub(crate) fn replace_range(
+        &mut self,
+        start: usize,
+        end: usize,
+        text: &str,
+        after: Option<usize>,
+    ) {
         if self.list.is_some() {
             // A list that can be edited is a list that can lie about what it
             // says.
@@ -121,7 +127,7 @@ impl Editor {
     }
 
     /// What `p` will put: the register a `"x` named, or the unnamed one.
-    pub fn chosen_register(&self) -> &Register {
+    pub(crate) fn chosen_register(&self) -> &Register {
         match self.register_prefix {
             Prefix::Named(name) => self.registers.get(name).unwrap_or(&self.register),
             Prefix::None | Prefix::Awaiting => &self.register,
@@ -178,7 +184,7 @@ impl Editor {
     /// Call after anything that may have moved the cursor or changed the
     /// buffer: it re-clamps the cursor, scrolls it back into view and marks the
     /// screen dirty.
-    pub fn after_edit(&mut self) {
+    pub(crate) fn after_edit(&mut self) {
         let came_from = self.last_cursor_row;
         // The row is always clamped; the column is not while a block is being made,
         // since a rectangle may reach past the end of a short line and `Cursor::clamp`
@@ -204,7 +210,12 @@ impl Editor {
     ///
     /// The register is untouched, and the cursor goes to the start of the range,
     /// which is where an operator leaves it.
-    pub fn change_case(&mut self, start: usize, end: usize, change: crate::command::CaseChange) {
+    pub(crate) fn change_case(
+        &mut self,
+        start: usize,
+        end: usize,
+        change: crate::command::CaseChange,
+    ) {
         if start >= end {
             return;
         }
@@ -234,7 +245,7 @@ impl Editor {
     /// when the line opens something — `{`, `(`, `[` — since the line after an
     /// opener is inside it. The level is a tab, which is what the Tab key types,
     /// so the file keeps one convention rather than two.
-    pub fn indent_for_new_line(&self, row: usize) -> String {
+    pub(crate) fn indent_for_new_line(&self, row: usize) -> String {
         let options = self.options.borrow();
         let smart = options.smartindent;
         if !options.autoindent && !smart {
@@ -292,7 +303,7 @@ impl Editor {
     /// a tab stop is worth — or all of them, when there are fewer, so a line that
     /// is barely indented is not left with a level's worth of nothing. A blank
     /// line is left blank: indenting nothing is not indentation.
-    pub fn shift_indent(&mut self, from: usize, to: usize, forward: bool) -> usize {
+    pub(crate) fn shift_indent(&mut self, from: usize, to: usize, forward: bool) -> usize {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -378,7 +389,7 @@ impl Editor {
     /// the highlighter knows, and this deliberately does not ask it, because a
     /// reindent that is wrong about a brace inside a string is a reindent a person
     /// can fix by hand.
-    pub fn reindent_lines(&mut self, from: usize, to: usize) -> usize {
+    pub(crate) fn reindent_lines(&mut self, from: usize, to: usize) -> usize {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -447,7 +458,7 @@ impl Editor {
     }
 
     /// The indentation of a line: its leading spaces and tabs.
-    pub fn indent_of(&self, row: usize) -> String {
+    pub(crate) fn indent_of(&self, row: usize) -> String {
         let line = self.buffer.line_string(row);
         line.chars()
             .take_while(|c| *c == ' ' || *c == '\t')
@@ -553,14 +564,14 @@ impl Editor {
     /// The clause about a bracket or a quote between the stop and the space (vim
     /// allows `.)` and `."`) is not done: the line's *last* character is what is
     /// looked at.
-    pub fn join_lines(&mut self, from: usize, to: usize) -> usize {
+    pub(crate) fn join_lines(&mut self, from: usize, to: usize) -> usize {
         self.join_lines_with(from, to, false)
     }
 
     /// The same, with `tight` set: `gJ`, which inserts and removes no spaces at
     /// all — the terminators go and the next line follows exactly as it was, indent
     /// and all.
-    pub fn join_lines_tight(&mut self, from: usize, to: usize) -> usize {
+    pub(crate) fn join_lines_tight(&mut self, from: usize, to: usize) -> usize {
         self.join_lines_with(from, to, true)
     }
 
@@ -621,7 +632,12 @@ impl Editor {
     /// opened to be appended to keeps what it had, and one that is written is
     /// replaced. Both walk the same lines, which is why the text of a range is
     /// built in one place.
-    pub fn append_range(&self, from: usize, to: usize, path: &Path) -> Result<usize, BufferError> {
+    pub(crate) fn append_range(
+        &self,
+        from: usize,
+        to: usize,
+        path: &Path,
+    ) -> Result<usize, BufferError> {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -655,7 +671,12 @@ impl Editor {
     /// This does not mark the buffer saved: what went to disk is part of it, and
     /// the rest is still unsaved — which is the difference between `:w` and
     /// `:1,5w somewhere`.
-    pub fn write_range(&self, from: usize, to: usize, path: &Path) -> Result<usize, BufferError> {
+    pub(crate) fn write_range(
+        &self,
+        from: usize,
+        to: usize,
+        path: &Path,
+    ) -> Result<usize, BufferError> {
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -668,7 +689,7 @@ impl Editor {
     /// Vim stops a command whose range names a mark that is not there rather
     /// than acting on a line nobody asked for, and so does this: the message is
     /// the same one the mark keys give.
-    pub fn unset_range_mark(&self, line: &str) -> Option<char> {
+    pub(crate) fn unset_range_mark(&self, line: &str) -> Option<char> {
         let (from, to) = crate::substitute::address_range(line);
         [from, to]
             .into_iter()
@@ -683,7 +704,7 @@ impl Editor {
     ///
     /// Only the keys that travel call this: a motion within a line is not a jump,
     /// and neither is a scroll.
-    pub fn record_jump(&mut self) {
+    pub(crate) fn record_jump(&mut self) {
         self.jumps.record(self.cursor);
         // `''` is not a walk through the list: it is the one place the last jump
         // started, so that pressing it twice comes back.

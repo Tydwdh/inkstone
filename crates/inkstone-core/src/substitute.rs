@@ -24,7 +24,7 @@
 
 /// One end of a line range: vim's addresses, as far as `:s` uses them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Address {
+pub(crate) enum Address {
     /// A line number, counted from one.
     Line(usize),
     /// The line the cursor is on.
@@ -40,19 +40,19 @@ pub enum Address {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Substitute {
     /// The pattern to find, in the regex dialect.
-    pub pattern: String,
+    pub(crate) pattern: String,
     /// What to put in its place, translated for the engine.
-    pub replacement: String,
+    pub(crate) replacement: String,
     /// Whether every match on a line is replaced, or only the first.
     pub all: bool,
     /// The first line to look at, if one was named.
-    pub from: Option<Address>,
+    pub(crate) from: Option<Address>,
     /// The last line to look at, if one was named.
-    pub to: Option<Address>,
+    pub(crate) to: Option<Address>,
     /// Whether this substitute ignores case.
-    pub ignore_case: bool,
+    pub(crate) ignore_case: bool,
     /// Whether every match is asked about before it is replaced.
-    pub confirm: bool,
+    pub(crate) confirm: bool,
 }
 
 /// Why a `:s` line did not parse.
@@ -80,7 +80,7 @@ impl Substitute {
     /// It is one when it is an address, an `s`, and a delimiter — so `s/foo/bar/`
     /// is a substitute while `set` is a command name that happens to start with
     /// an `s`.
-    pub fn looks_like(line: &str) -> bool {
+    pub(crate) fn looks_like(line: &str) -> bool {
         let Some(rest) = strip_range(line) else {
             return false;
         };
@@ -93,7 +93,7 @@ impl Substitute {
         }
     }
 
-    /// Parse a `:` line that [`Substitute::looks_like`] accepted.
+    /// Parse a `:` line that `Substitute::looks_like` accepted.
     pub fn parse(line: &str) -> Result<Self, SubstituteError> {
         let rest = strip_range(line).ok_or(SubstituteError::Argument)?;
         let (from, to) = address_range(line);

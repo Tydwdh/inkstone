@@ -50,7 +50,7 @@ macro_rules! settings {
             }
 
             /// The setting a script's name refers to.
-            pub fn from_name(name: &str) -> Option<Setting> {
+            pub(crate) fn from_name(name: &str) -> Option<Setting> {
                 Setting::ALL
                     .iter()
                     .copied()
@@ -119,7 +119,7 @@ macro_rules! commands {
         ///
         /// Generated from the declaration, which is the only place the list of
         /// commands appears.
-        pub fn with_builtins() -> Self {
+        pub(crate) fn with_builtins() -> Self {
             let mut registry = Self::new();
             $(
                 $(#[$meta])*

@@ -38,17 +38,17 @@ pub enum DialectError {
 
 /// A pattern translated for the engine, and what it said about case.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pattern {
+pub(crate) struct Pattern {
     /// The pattern in the engine's dialect.
-    pub pattern: String,
+    pub(crate) pattern: String,
     /// `Some(true)` after a `\c`, `Some(false)` after a `\C`, and `None` when
     /// the pattern said nothing about case — which leaves the decision to the
     /// `i` flag or to `ignorecase`.
-    pub ignore_case: Option<bool>,
+    pub(crate) ignore_case: Option<bool>,
 }
 
 /// Translate a pattern from vim's dialect into the engine's.
-pub fn translate(input: &str) -> Result<Pattern, DialectError> {
+pub(crate) fn translate(input: &str) -> Result<Pattern, DialectError> {
     let mut out = String::with_capacity(input.len());
     let mut ignore_case = None;
     // `\V` and everything after it: never magic again.

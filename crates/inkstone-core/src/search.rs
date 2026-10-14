@@ -41,7 +41,7 @@ pub enum Direction {
 
 impl Direction {
     /// The other way round, for `N`.
-    pub fn reversed(self) -> Self {
+    pub(crate) fn reversed(self) -> Self {
         match self {
             Direction::Forward => Direction::Backward,
             Direction::Backward => Direction::Forward,
@@ -88,12 +88,12 @@ impl Search {
     }
 
     /// The pattern, as typed. Empty means no search has been run.
-    pub fn pattern(&self) -> &str {
+    pub(crate) fn pattern(&self) -> &str {
         &self.pattern
     }
 
     /// Which way this search runs.
-    pub fn direction(&self) -> Direction {
+    pub(crate) fn direction(&self) -> Direction {
         self.direction
     }
 
@@ -138,7 +138,7 @@ impl Search {
     }
 
     /// Find the matches again, after the buffer changed.
-    pub fn refresh(&mut self, buffer: &Buffer) {
+    pub(crate) fn refresh(&mut self, buffer: &Buffer) {
         self.matches = match &self.compiled {
             Some(regex) => find(buffer, regex),
             None => Vec::new(),
@@ -152,23 +152,12 @@ impl Search {
         self.matches.clear();
     }
 
-    /// The compiled pattern, for a caller that wants to match with it — which is
-    /// what `:s` does, since a substitution replaces what a search finds.
-    pub fn regex(&self) -> Option<&Regex> {
-        self.compiled.as_ref()
-    }
-
-    /// Whether the search ignores case.
-    pub fn ignore_case(&self) -> bool {
-        self.ignore_case
-    }
-
     /// The match the cursor would land on when searching from `from`, going
     /// `direction`, wrapping round the end of the document the way vim does.
     ///
     /// `from` is a character index; a match that starts exactly at it is skipped
     /// for a forward search, so `n` moves on rather than standing still.
-    pub fn next_from(&self, from: usize, direction: Direction) -> Option<(usize, usize)> {
+    pub(crate) fn next_from(&self, from: usize, direction: Direction) -> Option<(usize, usize)> {
         if self.matches.is_empty() {
             return None;
         }
@@ -190,7 +179,7 @@ impl Search {
     }
 
     /// The match containing `at`, which is the one the cursor is on.
-    pub fn match_at(&self, at: usize) -> Option<(usize, usize)> {
+    pub(crate) fn match_at(&self, at: usize) -> Option<(usize, usize)> {
         self.matches
             .iter()
             .find(|(start, end)| *start <= at && at < *end)

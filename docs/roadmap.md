@@ -3123,6 +3123,29 @@ command line.
   is a *list* rather than a flag on each command, so a new command that moves
   windows has to be added to it — that is the one thing to keep in step.
 
+## Done — a file name is expanded the way vim expands one
+
+"~" at the front is the home directory and `$VAR` is the variable's value —
+wherever a name is typed, not only in `gf`.
+
+- **What shipped:** `expand_path`, called by `path_param` (so every `:` command
+  that takes a path: `:e`, `:w`, `:r`, `:sp`, …) and by `gf`. `~user` is left as
+  written, because looking a user up needs the password database and the standard
+  library has no way to ask for it; so is a variable that is not set, which is the
+  honest answer for a name that cannot be resolved.
+- **Constraints it had to respect, and how:** the `~` is only a home directory as
+  a component of its own — `~someone/x` is a name, not a user — and the path is
+  built as a string first because a variable's value may contain the separators
+  the expansion is in the middle of.
+- **What the tests could not show, and the terminal could not either:** the unit
+  test proves the expansion, but the smoke could not tell an expanded name from an
+  unexpanded one, because `:e` on a *new* file reports the file's name and not the
+  path it was given. That is written here rather than left as an implication.
+- **Files:** `inkstone-core` (`expand_path`, `home_dir`, `path_param`'s return
+  type and its call sites).
+- **Left for later:** `~user`, `%` and `#` for the current and alternate file, and
+  `'includeexpr'`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

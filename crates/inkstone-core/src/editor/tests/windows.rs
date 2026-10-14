@@ -584,3 +584,54 @@ fn a_name_can_be_found_with_a_suffix_added() {
         ed.buffer.path()
     );
 }
+
+#[test]
+fn a_path_a_person_types_is_expanded() {
+    // "For Unix the '~' character is expanded, like in `~user/file`. Environment
+    // variables are expanded too" — vim's rule for a file name, and one that has
+    // to hold wherever a name is typed, not only in `gf`.
+    let dir = std::env::temp_dir().join("inkstone-expand");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("here.txt"), "here\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    // `$TMPDIR` and `$TEMP` are the same directory this test just wrote into, and
+    // the expansion is what the editor has to do rather than the test.
+    // Whichever variable *is* set, since the name has to name a real directory for
+    // the expansion to be what is under test rather than the test's own guessing.
+    let (variable, _) = [("TMPDIR", "TMPDIR"), ("TEMP", "TEMP"), ("TMP", "TMP")]
+        .into_iter()
+        .find(|(name, _)| std::env::var(name).is_ok())
+        .expect("a temporary directory in the environment");
+    ed.execute_cmdline(&format!("e ${variable}/inkstone-expand/here.txt"));
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("here.txt")),
+        "opened through the variable: {:?}",
+        ed.buffer.path()
+    );
+    assert_eq!(ed.buffer.text(), "here\n");
+
+    // `~` is the home directory, and `~user` is left as written: there is no
+    // password database to look it up in.
+    let expanded = crate::command::expand_path("~/x");
+    if let Some(home) = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .filter(|home| !home.is_empty())
+    {
+        assert_eq!(expanded, std::path::PathBuf::from(format!("{home}/x")));
+    }
+    assert_eq!(
+        crate::command::expand_path("~someone/x"),
+        std::path::PathBuf::from("~someone/x"),
+        "a name this cannot look up is left alone"
+    );
+    assert_eq!(
+        crate::command::expand_path("$NOT_SET_ANYWHERE_1234/x"),
+        std::path::PathBuf::from("$NOT_SET_ANYWHERE_1234/x"),
+        "and so is a variable that is not set"
+    );
+}

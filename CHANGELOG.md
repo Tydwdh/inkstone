@@ -26,6 +26,10 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- A file name a person types is expanded the way vim expands one: `~` at the front
+  is the home directory and `$VAR`/`${VAR}` is the variable's value, wherever the
+  name is typed — `:e`, `:w`, `:r`, `gf`. `~user` is left as written, since looking
+  a user up needs the password database; so is a variable that is not set.
 - `'cedit'` (CTRL-F, vim's default): the key that opens the command-line window
   from the command line, with "the command as typed so far" as its last line. Both
   of vim's spellings work — `<C-f>` and the caret form `^F` — and a modified letter

@@ -420,6 +420,11 @@ and `:q` throws the window away without asking, because what was edited there is
 discarded by design. A command run from a script is not
 in the history: it is what a *person* typed.
 
+A name typed anywhere — `:e`, `:w`, `:r`, `gf` — has `~` expanded to the home
+directory and `$VAR`/`${VAR}` to the variable's value, which is vim's rule for a
+file name. `~user` is left as written: looking a user up needs the password
+database, which the standard library does not offer.
+
 `gf` opens the file whose name is under the cursor — read as a *file name* rather
 than as a word, so `src/main.rs` is one name and not three. It is looked for beside
 the file that is open first, since that is what a name in a file means, and then in

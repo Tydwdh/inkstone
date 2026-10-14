@@ -9,7 +9,7 @@
 //! and `dd` (count 1) go through the same code path.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use inkstone_rpc::Param;
 
@@ -340,11 +340,79 @@ fn str_param(params: &[Param]) -> Option<&str> {
     }
 }
 
-fn path_param(params: &[Param]) -> Option<&Path> {
+fn path_param(params: &[Param]) -> Option<PathBuf> {
     match params.first() {
-        Some(Param::Str(s)) if !s.is_empty() => Some(Path::new(s)),
+        Some(Param::Str(s)) if !s.is_empty() => Some(expand_path(s)),
         _ => None,
     }
+}
+
+/// A path as a person wrote it, with `~` and environment variables expanded.
+///
+/// Vim's rule for a file name: "for Unix the '~' character is expanded, like in
+/// `~user/file`. Environment variables are expanded too". `~user` is *not* here —
+/// it needs the password database, which the standard library does not offer — and
+/// neither are `%` and `#` for the current and alternate file.
+pub(crate) fn expand_path(text: &str) -> PathBuf {
+    let mut out = String::new();
+    let mut rest = text;
+    // A `~` at the front is the home directory, but only as a component of its
+    // own: `~user` is a name this cannot look up, and is left as it was written.
+    if let Some(tail) = rest.strip_prefix('~') {
+        if !tail.starts_with(|c: char| c.is_alphanumeric()) {
+            if let Some(home) = home_dir() {
+                out.push_str(&home);
+                rest = tail;
+            }
+        }
+    }
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        // `$VAR` or `${VAR}`; a `$` that names nothing is a dollar sign.
+        let braced = chars.peek() == Some(&'{');
+        if braced {
+            chars.next();
+        }
+        let mut name = String::new();
+        while let Some(&c) = chars.peek() {
+            if braced && c == '}' {
+                chars.next();
+                break;
+            }
+            if !braced && !(c.is_alphanumeric() || c == '_') {
+                break;
+            }
+            name.push(c);
+            chars.next();
+        }
+        match std::env::var(&name) {
+            Ok(value) if !name.is_empty() => out.push_str(&value),
+            _ => {
+                out.push('$');
+                if braced {
+                    out.push('{');
+                }
+                out.push_str(&name);
+                if braced {
+                    out.push('}');
+                }
+            }
+        }
+    }
+    PathBuf::from(out)
+}
+
+/// The home directory, from the environment: the standard library's own lookup is
+/// deprecated, and these are the variables every platform sets.
+fn home_dir() -> Option<String> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .filter(|home| !home.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -1820,7 +1888,7 @@ fn escape(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 
 fn save(editor: &mut Editor, params: &[Param]) -> Result<()> {
     let asked_for_layout = path_param(params).is_none() && editor.options.borrow().formatonsave;
-    match editor.write_buffer(path_param(params)) {
+    match editor.write_buffer(path_param(params).as_deref()) {
         Ok(path) => {
             editor.message = format!("\"{}\" written", path.display());
             // `formatonsave` asks *after* the write, not instead of it: a server
@@ -1849,7 +1917,7 @@ fn save(editor: &mut Editor, params: &[Param]) -> Result<()> {
 
 /// `:w!` — write even though the file changed on disk.
 fn save_force(editor: &mut Editor, params: &[Param]) -> Result<()> {
-    match editor.buffer.save_with(path_param(params), true) {
+    match editor.buffer.save_with(path_param(params).as_deref(), true) {
         Ok(path) => {
             // Forced writes go through the same marker as any other: what is on
             // disk is what is being looked at, however it got there.
@@ -2127,7 +2195,7 @@ fn split(editor: &mut Editor, axis: Axis, params: &[Param]) -> Result<()> {
         // A named file joins the list first — a path that is not there leaves
         // the screen as it was, and the window that asked for the split keeps
         // what it had — and the new window shows it.
-        Some(path) => match editor.add_file(path) {
+        Some(path) => match editor.add_file(&path) {
             Ok(document) => {
                 editor.split_window(axis, Some(document));
             }
@@ -2336,7 +2404,7 @@ fn substitute_again_flags(editor: &mut Editor, _params: &[Param]) -> Result<()> 
 /// `:tabnew [file]` — a tab of its own, on an empty file or on the one named.
 fn tab_new(editor: &mut Editor, params: &[Param]) -> Result<()> {
     match path_param(params) {
-        Some(path) => match editor.add_file(path) {
+        Some(path) => match editor.add_file(&path) {
             Ok(document) => {
                 editor.open_tab(Some(document));
                 let name = editor.buffer.display_name();

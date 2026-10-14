@@ -26,6 +26,15 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `'incsearch'`, on by default: the cursor goes to the match while a search is
+  still being typed, and is drawn on that match rather than on the line being
+  typed, so a search is aimed rather than committed blind. `<Enter>` accepts it
+  where the preview put the cursor, `<Esc>` puts the cursor back *and* puts the
+  search that was in force back, and `<C-g>`/`<C-t>` walk the matches of the
+  pattern so far. The preview is a real search — the pattern is compiled and run
+  on every keystroke — so what is highlighted on screen is the pattern being
+  typed and not the last one's; a pattern that matches nothing, or does not
+  compile yet, shows and says nothing until the line is accepted.
 - `gr` goes to the first place a reference answer names — the list is what the
   message row can hold, and the place is where a person meant to go, with `<C-o>`
   bringing them back.

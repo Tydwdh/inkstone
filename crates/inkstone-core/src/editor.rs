@@ -87,6 +87,23 @@ impl Prompt {
     }
 }
 
+/// A search being typed, shown as it goes — `'incsearch'`.
+///
+/// The pattern is run for real as it is typed, so the highlight on screen is
+/// the one being typed and not the last one's; what was in force before is kept
+/// beside it, because a search that is cancelled has to put it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IncSearch {
+    /// Where the cursor was when the search started: where a cancelled one
+    /// leaves it, and where each keystroke searches from again.
+    start: Cursor,
+    /// The search that was in force, to put back if this one is cancelled.
+    previous: Option<(String, Direction)>,
+    /// Whether a match is on screen right now — the cursor goes to it, and the
+    /// command line stops holding the cursor while it is.
+    showing: bool,
+}
+
 /// A visual selection: `v` or `V` was pressed, and the cursor is one end of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
@@ -1171,6 +1188,8 @@ pub struct Editor {
     pub clipboard: Option<String>,
     /// The search that is up, if one has been run.
     pub search: Search,
+    /// The search being typed, when `'incsearch'` is showing one.
+    incsearch: Option<IncSearch>,
     /// What a language server said about the document on screen.
     pub diagnostics: Vec<Diagnostic>,
     /// The syntax colours, and the per-line state they need: what a line starts
@@ -1271,6 +1290,7 @@ impl Editor {
             mouse_dragged: false,
             clipboard: None,
             search: Search::new(),
+            incsearch: None,
             highlighter: LineStates::new(Language::Plain),
             diagnostics: Vec::new(),
             should_quit: false,
@@ -1476,6 +1496,10 @@ impl Editor {
             selection: self.selection.and_then(|_| self.visual_span()),
             matches: self.search.matches(),
             current_match: self.search.match_at(self.cursor.char_idx(&self.buffer)),
+            incsearch: self
+                .incsearch
+                .as_ref()
+                .is_some_and(|preview| preview.showing),
             highlighter: options.highlight.then_some(&self.highlighter),
             viewport: self.viewport,
             block: self.visual_block(),
@@ -4219,12 +4243,19 @@ impl Editor {
     fn handle_command_line(&mut self, key: KeyMsg) {
         match key.code {
             KeyCode::Esc => {
+                // A cancelled search leaves the cursor where it started and puts
+                // back the search that was in force.
+                self.end_preview(false);
                 self.mode = Mode::Normal;
                 self.cmdline.clear();
                 self.cmdline_cursor = 0;
                 self.forget_recall();
             }
             KeyCode::Enter => {
+                // The preview moved the cursor to the match it found; the search
+                // itself runs from where the prompt was opened, so it lands on
+                // that same match rather than on the one after it.
+                self.end_preview(true);
                 let line = std::mem::take(&mut self.cmdline);
                 self.cmdline_cursor = 0;
                 self.remember_prompt(&line);
@@ -4237,8 +4268,14 @@ impl Editor {
                     None => self.execute_cmdline(&line),
                 }
             }
-            KeyCode::Backspace => self.cmdline_delete_backward(),
-            KeyCode::Delete => self.cmdline_delete_forward(),
+            KeyCode::Backspace => {
+                self.cmdline_delete_backward();
+                self.preview_search();
+            }
+            KeyCode::Delete => {
+                self.cmdline_delete_forward();
+                self.preview_search();
+            }
             KeyCode::Left => self.cmdline_cursor = self.cmdline_cursor.saturating_sub(1),
             KeyCode::Right => {
                 self.cmdline_cursor = (self.cmdline_cursor + 1).min(self.cmdline_len())
@@ -4247,7 +4284,14 @@ impl Editor {
             KeyCode::End => self.cmdline_cursor = self.cmdline_len(),
             KeyCode::Up => self.cmdline_recall(true),
             KeyCode::Down => self.cmdline_recall(false),
-            KeyCode::Char(c) if !key.is_ctrl() && !key.is_alt() => self.cmdline_push(c),
+            // While the pattern is being typed, `<C-g>` and `<C-t>` walk the
+            // matches it has so far, which is what they do in vim.
+            KeyCode::Char('g') if key.is_ctrl() => self.preview_next(Direction::Forward),
+            KeyCode::Char('t') if key.is_ctrl() => self.preview_next(Direction::Backward),
+            KeyCode::Char(c) if !key.is_ctrl() && !key.is_alt() => {
+                self.cmdline_push(c);
+                self.preview_search();
+            }
             _ => {}
         }
     }
@@ -4419,6 +4463,142 @@ impl Editor {
     fn goto_match(&mut self, start: usize) {
         self.cursor.set_char_idx(&self.buffer, start);
         self.after_edit();
+    }
+
+    /// Show where the pattern being typed matches — `'incsearch'`.
+    ///
+    /// The search is run for real, so what is highlighted is the pattern being
+    /// typed rather than the last one's, and the search that was in force is
+    /// kept beside it for a cancellation to put back.
+    ///
+    /// Every keystroke searches *from where the search started* again, which is
+    /// vim's rule and the reason typing more of a pattern keeps the cursor on
+    /// the first match from there instead of walking through the matches.
+    fn preview_search(&mut self) {
+        let Some(direction) = self.prompt.direction() else {
+            return;
+        };
+        if !self.options.borrow().incsearch {
+            return;
+        }
+        let start = match &self.incsearch {
+            Some(preview) => preview.start,
+            None => {
+                let previous = (!self.search.is_empty())
+                    .then(|| (self.search.pattern().to_string(), self.search.direction()));
+                let start = self.cursor;
+                self.incsearch = Some(IncSearch {
+                    start,
+                    previous,
+                    showing: false,
+                });
+                start
+            }
+        };
+        let pattern = self.cmdline.clone();
+        let ignore_case = self.options.borrow().ignorecase;
+        // A pattern that does not compile, or one that matches nothing, shows
+        // nothing and says nothing: this is not the search yet, and a `:` line
+        // that complained on every keystroke would be unusable.
+        if pattern.is_empty() {
+            self.search.clear();
+            self.cursor = start;
+            self.showing(false);
+            return;
+        }
+        if self
+            .search
+            .run(&self.buffer, &pattern, direction, ignore_case)
+            .is_err()
+        {
+            self.search.clear();
+            self.cursor = start;
+            self.showing(false);
+            return;
+        }
+        if self.search.matches().is_empty() {
+            self.cursor = start;
+            self.showing(false);
+            return;
+        }
+        // The search starts where the prompt was opened, not where the last
+        // preview left the cursor.
+        let here = self.cursor;
+        self.cursor = start;
+        let from = self.search_start(direction);
+        self.cursor = here;
+        let found = self
+            .search
+            .match_at(from)
+            .or_else(|| self.search.next_from(from, direction));
+        match found {
+            Some((at, _)) => {
+                self.goto_match(at);
+                self.showing(true);
+            }
+            None => {
+                self.cursor = start;
+                self.showing(false);
+            }
+        }
+    }
+
+    /// Move the preview on to the next match (`<C-g>`) or the previous one
+    /// (`<C-t>`), while the pattern is still being typed.
+    fn preview_next(&mut self, direction: Direction) {
+        // `is_none_or` is newer than this workspace's MSRV; `is_some_and` is not.
+        if !self
+            .incsearch
+            .as_ref()
+            .is_some_and(|preview| preview.showing)
+        {
+            return;
+        }
+        let here = self.search.match_at(self.cursor.char_idx(&self.buffer));
+        if let Some((at, _)) = here.and_then(|(at, _)| self.search.next_from(at, direction)) {
+            self.goto_match(at);
+        }
+    }
+
+    /// Note whether the preview has a match on screen, which is what the
+    /// drawing needs to know: the cursor belongs to the match, not to the line
+    /// being typed.
+    fn showing(&mut self, showing: bool) {
+        if let Some(preview) = self.incsearch.as_mut() {
+            preview.showing = showing;
+        }
+    }
+
+    /// Forget the preview of a search, if one is up — the line it belonged to is
+    /// gone. The cursor is left where it is: this is for a prompt that is being
+    /// opened, not one that is being cancelled.
+    pub(crate) fn forget_preview(&mut self) {
+        self.incsearch = None;
+    }
+
+    /// Put the cursor back where the preview's search started and forget the
+    /// preview.
+    ///
+    /// `keep` is whether the preview's search stands: it does when the line is
+    /// accepted, and does not when it is cancelled — a cancelled search puts
+    /// back the one that was in force, so `n` still walks what it walked.
+    fn end_preview(&mut self, keep: bool) {
+        let Some(preview) = self.incsearch.take() else {
+            return;
+        };
+        self.cursor = preview.start;
+        if keep {
+            return;
+        }
+        match preview.previous {
+            Some((pattern, direction)) => {
+                let ignore_case = self.options.borrow().ignorecase;
+                let _ = self
+                    .search
+                    .run(&self.buffer, &pattern, direction, ignore_case);
+            }
+            None => self.search.clear(),
+        }
     }
 
     /// Start asking about each match of `spec`, one at a time.
@@ -11231,6 +11411,125 @@ mod tests {
         assert_eq!(ed.cursor, Cursor::new(0, 0), "and `n` keeps going that way");
         feed(&mut ed, "N");
         assert_eq!(ed.cursor, Cursor::new(0, 8), "`N` turns round");
+    }
+
+    #[test]
+    fn a_search_shows_its_match_while_the_pattern_is_typed() {
+        // `'incsearch'`: the cursor goes to the match as the pattern is typed,
+        // and each keystroke searches from where the prompt was opened again —
+        // which is why a longer pattern narrows to a later match instead of
+        // walking through them.
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("xay\nxbz\n");
+        feed(&mut ed, "/x");
+        assert_eq!(ed.mode, Mode::Command, "still on the `:` line");
+        assert_eq!(ed.cursor, Cursor::new(0, 0), "the first `x`");
+        feed(&mut ed, "b");
+        assert_eq!(ed.cursor, Cursor::new(1, 0), "`xb` only matches below");
+
+        // Accepting lands where the preview was, not on the match after it.
+        feed(&mut ed, "<Enter>");
+        assert_eq!(ed.mode, Mode::Normal);
+        assert_eq!(ed.cursor, Cursor::new(1, 0));
+        assert_eq!(ed.message, "");
+        assert_eq!(ed.search.pattern(), "xb");
+    }
+
+    #[test]
+    fn a_cancelled_search_puts_the_cursor_and_the_search_back() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one two\n");
+        feed(&mut ed, "/two<Enter>");
+        assert_eq!(ed.cursor, Cursor::new(0, 4));
+
+        feed(&mut ed, "/one");
+        assert_eq!(ed.cursor, Cursor::new(0, 0), "the preview moved");
+        feed(&mut ed, "<Esc>");
+        assert_eq!(ed.cursor, Cursor::new(0, 4), "and the cursor came back");
+        assert_eq!(
+            ed.search.pattern(),
+            "two",
+            "a cancelled search puts the one that was in force back"
+        );
+
+        // With nothing in force before it, cancelling leaves no search at all.
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one two\n");
+        feed(&mut ed, "/two<Esc>");
+        assert_eq!(ed.cursor, Cursor::new(0, 0));
+        assert!(ed.search.is_empty(), "nothing to repeat");
+        feed(&mut ed, "n");
+        assert_eq!(ed.message, "E35: No previous search pattern");
+    }
+
+    #[test]
+    fn a_preview_that_finds_nothing_says_nothing() {
+        // The search has not been run yet, so a pattern that matches nothing is
+        // not an error: it shows nothing and says nothing, and the cursor stays
+        // where the search started.
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one\ntwo\n");
+        feed(&mut ed, "/zzz");
+        assert_eq!(ed.message, "");
+        assert_eq!(ed.cursor, Cursor::new(0, 0));
+        assert!(ed.search.matches().is_empty(), "nothing is highlighted");
+
+        // Nor is a pattern that does not compile — a half-typed one is normal.
+        feed(&mut ed, "<Esc>");
+        feed(&mut ed, "/\\zs");
+        assert_eq!(ed.message, "");
+        assert_eq!(ed.cursor, Cursor::new(0, 0));
+        feed(&mut ed, "<Esc>");
+
+        // The line itself still reports both, when it is accepted.
+        feed(&mut ed, "/zzz<Enter>");
+        assert_eq!(ed.message, "E486: Pattern not found: zzz");
+        feed(&mut ed, "/\\zs<Enter>");
+        assert!(ed.message.starts_with("E54: "), "{}", ed.message);
+    }
+
+    #[test]
+    fn noincsearch_types_the_pattern_without_moving() {
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one two\n");
+        ed.execute_cmdline("set noincsearch");
+        feed(&mut ed, "/two");
+        assert_eq!(
+            ed.cursor,
+            Cursor::new(0, 0),
+            "nothing is shown while typing"
+        );
+        feed(&mut ed, "<Enter>");
+        assert_eq!(ed.cursor, Cursor::new(0, 4), "and the search still runs");
+    }
+
+    #[test]
+    fn ctrl_g_and_ctrl_t_walk_the_matches_being_typed() {
+        // `<C-g>` goes to the next match and `<C-t>` to the previous one, while
+        // the pattern is still on the line — vim's rule for them.
+        let mut ed = Editor::for_tests();
+        ed.buffer = Buffer::from_text("one two one\n");
+        feed(&mut ed, "/o");
+        assert_eq!(ed.cursor, Cursor::new(0, 0));
+        feed(&mut ed, "<C-g>");
+        assert_eq!(ed.cursor, Cursor::new(0, 6), "the next `o`");
+        feed(&mut ed, "<C-g>");
+        assert_eq!(ed.cursor, Cursor::new(0, 8));
+        feed(&mut ed, "<C-t>");
+        assert_eq!(ed.cursor, Cursor::new(0, 6), "and back");
+        // Typing again searches from the start once more.
+        feed(&mut ed, "n");
+        assert_eq!(
+            ed.cursor,
+            Cursor::new(0, 0),
+            "`on` matches at the first `o`"
+        );
+        feed(&mut ed, "<C-g>");
+        assert_eq!(ed.cursor, Cursor::new(0, 8), "the second `on`");
+        feed(&mut ed, "<C-t>");
+        assert_eq!(ed.cursor, Cursor::new(0, 0), "and back to the first");
+        feed(&mut ed, "<Enter>");
+        assert_eq!(ed.cursor, Cursor::new(0, 0), "accepted at the first match");
     }
 
     #[test]

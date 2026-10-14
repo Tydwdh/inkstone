@@ -1632,6 +1632,8 @@ fn enter_prompt(editor: &mut Editor, prompt: Prompt) {
     editor.cmdline.clear();
     editor.clear_pending();
     editor.message.clear();
+    // A preview belongs to the line that was being typed; this is a new one.
+    editor.forget_preview();
 }
 
 /// Go to the next match `count` times, wrapping round the document.

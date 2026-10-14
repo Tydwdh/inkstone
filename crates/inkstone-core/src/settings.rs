@@ -171,6 +171,8 @@ settings! {
     Number as number: bool = false,
     /// Whether a search ignores case.
     IgnoreCase as ignorecase: bool = false,
+    /// Whether a search shows its match while the pattern is still being typed.
+    IncSearch as incsearch: bool = true,
     /// Whether to colour code by what it is.
     Highlight as highlight: bool = true,
     /// Whether to speak to a language server for the file that is open. Off by

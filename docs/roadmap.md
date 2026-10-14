@@ -2603,6 +2603,42 @@ tokenizer, with [`highlighting.md`](highlighting.md) as the design note.
 - **Left for later:** a popup for a long hover, `definition` with a preview
   window, references, and `textDocument/documentSymbol`.
 
+## Done — `'incsearch'`
+
+The match shows while the pattern is still being typed.
+
+- **What shipped:** `'incsearch'`, on by default the way vim has it. Typing `/`
+  or `?` and then characters moves the cursor to the first match from where the
+  prompt was opened, and the cursor is drawn *on that match* rather than in the
+  line being typed. `<Enter>` accepts it and lands where the preview was;
+  `<Esc>` puts the cursor back and puts back the search that was in force, so
+  `n` still walks what it walked. `<C-g>` and `<C-t>` walk the matches of the
+  pattern so far, which is what they do in vim.
+- **Constraints it had to respect, and how:** the preview had to be a *real*
+  search — the pattern is compiled and run on every keystroke — because the
+  highlight on screen is the search's matches and the match the cursor is on, and
+  a second, parallel "preview" highlight would have had to be taught to the
+  renderer for no gain. That makes the search that was in force something to
+  *keep*: it is put back by re-running it on a cancellation, which is cheap and
+  needs no clone of the compiled pattern.
+  The other constraint is the one this project keeps meeting: the cursor is drawn
+  in two places — the buffer or the line being typed — and the drawing, not the
+  editor's state, decides which. The flag the renderer reads is "a match is on
+  screen right now", so a pattern that matches nothing leaves the cursor in the
+  prompt where it belongs.
+- **What the tests caught:** that `<Enter>` must search from where the prompt was
+  *opened* and not from where the preview left the cursor — otherwise accepting
+  a preview lands on the match after the one that was shown. And that a
+  half-typed pattern is not an error: `\zs` and `\(` say nothing while they are
+  being typed, and say `E54` when the line is accepted, which is the difference
+  between a preview and a search.
+- **Files:** `inkstone-core` (`IncSearch`, `preview_search`, `preview_next`,
+  `end_preview`, the `<Esc>`/`<Enter>` arms of the command line, `settings.rs`,
+  `render.rs`'s cursor cell and one field on `View`).
+- **Left for later:** `'hlsearch'` as a setting of its own (every match is
+  highlighted whenever a search is up, which is `'hlsearch'` always on), and
+  `'nowrapscan'`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

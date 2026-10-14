@@ -56,6 +56,9 @@ pub struct View<'a> {
     /// The one match the cursor is inside, if any: it is highlighted more
     /// strongly, because it is the one `n` would move off.
     pub current_match: Option<(usize, usize)>,
+    /// Whether a search being typed is showing its match right now — the cursor
+    /// belongs to that match, not to the line the pattern is being typed on.
+    pub incsearch: bool,
     /// The syntax colours, or `None` when highlighting is off. It is asked for
     /// the spans of a line at a time, and remembers what it worked out.
     pub highlighter: Option<&'a crate::highlight::LineStates>,
@@ -280,8 +283,9 @@ pub fn compose(view: &View<'_>) -> Composed {
     let (cursor, cursor_visible) = match (view.mode, view.cmdline.as_deref(), view.cmdline_cursor) {
         // While a line is being typed the cursor is *in* that line: that is
         // where the next character will go, and where an input method's window
-        // belongs.
-        (Mode::Command, Some(line), Some(at)) => prompt_cursor(view, line, at),
+        // belongs. A search that is showing its match is the exception: the
+        // cursor goes to the match, the way vim shows it.
+        (Mode::Command, Some(line), Some(at)) if !view.incsearch => prompt_cursor(view, line, at),
         _ => cursor_position(view, cursor_at),
     };
     Composed {
@@ -1032,6 +1036,7 @@ mod tests {
         foldlevel: usize,
         matches: Vec<(usize, usize)>,
         current_match: Option<(usize, usize)>,
+        incsearch: bool,
         highlighter: Option<crate::highlight::LineStates>,
         viewport: Viewport,
         tabstop: usize,
@@ -1053,6 +1058,7 @@ mod tests {
                 foldlevel: 0,
                 matches: Vec::new(),
                 current_match: None,
+                incsearch: false,
                 highlighter: None,
                 viewport: Viewport::new(width, height),
                 tabstop: 4,
@@ -1074,6 +1080,7 @@ mod tests {
                 foldlevel: self.foldlevel,
                 matches: &self.matches,
                 current_match: self.current_match,
+                incsearch: self.incsearch,
                 highlighter: self.highlighter.as_ref(),
                 viewport: self.viewport,
                 rects: Vec::new(),
@@ -1556,6 +1563,26 @@ mod tests {
             function_color,
             "until the comment ends at column 14 and the code starts again"
         );
+    }
+
+    #[test]
+    fn the_cursor_is_at_the_match_while_a_search_is_being_typed() {
+        // A search that is showing its match takes the cursor out of the line
+        // being typed and puts it on the match, which is where vim shows it.
+        let mut c = Case::new("one two\n", 20, 3);
+        c.mode = Mode::Command;
+        c.cmdline = Some("/two".into());
+        c.cmdline_cursor = Some(4);
+        let out = c.compose();
+        assert_eq!(out.cursor, (5, 2), "the prompt holds the cursor");
+        assert!(out.cursor_visible);
+
+        c.incsearch = true;
+        c.cursor = Cursor::new(0, 4);
+        let out = c.compose();
+        assert_eq!(out.cursor, (4, 0), "and now the match does");
+        assert_eq!(row(&out, 2), "/two", "the line is still drawn");
+        assert!(out.cursor_visible);
     }
 
     #[test]

@@ -54,9 +54,8 @@ Both are the same program below the drawing, and both take a click: a drag
 selects, `<C-c>` copies to the system clipboard, and the wheel scrolls.
 
 Not implemented: `\zs` and `\ze` in a pattern — refused rather than
-mistranslated — search as the pattern is typed, and double-click word
-selection. [`docs/roadmap.md`](docs/roadmap.md) lists the rest, with what each
-thing would have to respect.
+mistranslated — and double-click word selection. [`docs/roadmap.md`](docs/roadmap.md)
+lists the rest, with what each thing would have to respect.
 
 ## Build and run
 
@@ -323,6 +322,13 @@ Keys that are not bindings, because they are what the mode is for:
 `/pattern` searches forwards, `?pattern` backwards, `n` and `N` move between
 matches and every match on screen is underlined (the one the cursor is on is
 bold as well). An empty pattern repeats the last search.
+
+`'incsearch'` is on: the cursor goes to the match as the pattern is typed, and
+the cursor is drawn there rather than on the line being typed, so a search is
+aimed rather than committed blind. `<Enter>` accepts it where the preview put the
+cursor; `<Esc>` puts the cursor back and puts the search that was in force back
+too, so `n` still walks what it walked. `<C-g>` and `<C-t>` walk the matches of
+the pattern so far — next and previous — while the line is still open.
 
 `J` joins the cursor's line with the one below it — the next line's indent goes and
 a space takes its place — and a count joins that many lines (`3J`). `gJ` joins
@@ -655,7 +661,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` (an integer), `foldnestmax` (an integer) and `foldignore` (characters) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `incsearch`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` (an integer), `foldnestmax` (an integer) and `foldignore` (characters) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

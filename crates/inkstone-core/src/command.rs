@@ -1410,7 +1410,11 @@ fn substitute(editor: &mut Editor, params: &[Param]) -> Result<()> {
         editor.message = msg.clone();
         return Err(CommandError::Failed(msg));
     };
-    let spec = match Substitute::parse(line) {
+    let (ignorecase, smartcase) = {
+        let options = editor.options.borrow();
+        (options.ignorecase, options.smartcase)
+    };
+    let spec = match Substitute::parse(line, ignorecase, smartcase) {
         Ok(spec) => spec,
         Err(error) => {
             let msg = error.to_string();

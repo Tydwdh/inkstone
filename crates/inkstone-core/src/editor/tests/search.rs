@@ -851,3 +851,84 @@ fn normal_leaves_what_its_keys_had_to_say_standing() {
     feed(&mut ed, ":normal x<Enter>");
     assert_eq!(ed.message, "1 line normalised");
 }
+
+#[test]
+fn smartcase_takes_ignorecase_back_for_a_pattern_with_a_capital() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("Hello hello\n");
+    ed.execute_cmdline("set ignorecase");
+    feed(&mut ed, "/HELLO<Enter>");
+    assert_eq!(
+        ed.search.matches().len(),
+        2,
+        "'ignorecase' alone finds both"
+    );
+    feed(&mut ed, "/Hello<Enter>");
+    assert_eq!(
+        ed.search.matches().len(),
+        2,
+        "and a capital changes nothing"
+    );
+
+    // With `'smartcase'`, a pattern with an upper case letter in it is taken
+    // literally: it is what makes `/Foo` find `Foo` and `/foo` find either.
+    ed.execute_cmdline("set smartcase");
+    feed(&mut ed, "/HELLO<Enter>");
+    assert_eq!(ed.message, "E486: Pattern not found: HELLO");
+    feed(&mut ed, "/Hello<Enter>");
+    assert_eq!(ed.search.matches().len(), 1, "the capital one only");
+    feed(&mut ed, "/hello<Enter>");
+    assert_eq!(
+        ed.search.matches().len(),
+        2,
+        "all lower case still finds both"
+    );
+}
+
+#[test]
+fn a_substitute_obeys_the_case_settings_and_its_own_flags() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("Hello hello\n");
+    // `'ignorecase'` is used for `:s` as much as for `/`.
+    ed.execute_cmdline("set ignorecase");
+    ed.execute_cmdline("s/HELLO/x/");
+    assert_eq!(ed.buffer.text(), "x hello\n");
+
+    // `'smartcase'` takes it back for a pattern with an upper case letter.
+    ed.buffer = Buffer::from_text("Hello hello\n");
+    ed.execute_cmdline("set smartcase");
+    ed.execute_cmdline("s/HELLO/x/");
+    assert_eq!(ed.buffer.text(), "Hello hello\n", "nothing was replaced");
+    assert_eq!(ed.message, "E486: Pattern not found: HELLO");
+    // And the `i` flag is the way to say "ignore case here", `I` the way to say
+    // the opposite when the setting would have ignored it.
+    ed.execute_cmdline("s/HELLO/x/i");
+    assert_eq!(ed.buffer.text(), "x hello\n");
+    ed.buffer = Buffer::from_text("Hello hello\n");
+    ed.execute_cmdline("s/HELLO/y/I");
+    assert_eq!(ed.buffer.text(), "Hello hello\n", "`I` is case matters");
+}
+
+#[test]
+fn a_global_line_obeys_the_case_settings() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("Hello\nhello\nbye\n");
+    ed.execute_cmdline("set ignorecase");
+    ed.execute_cmdline("g/HELLO/d");
+    assert_eq!(ed.buffer.text(), "bye\n", "both lines went");
+
+    ed.buffer = Buffer::from_text("Hello\nhello\nbye\n");
+    ed.execute_cmdline("set smartcase");
+    ed.execute_cmdline("g/HELLO/d");
+    assert_eq!(
+        ed.buffer.text(),
+        "Hello\nhello\nbye\n",
+        "the capital is taken literally, and nothing matches it"
+    );
+    ed.execute_cmdline("g/Hello/d");
+    assert_eq!(
+        ed.buffer.text(),
+        "hello\nbye\n",
+        "and this one line matches"
+    );
+}

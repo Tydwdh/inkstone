@@ -2801,6 +2801,35 @@ guessed.
   line, and this editor will not run a script per line per frame; a format string
   would be new syntax, so it wants a design note first.
 
+## Done — the case rules of searching
+
+`'smartcase'`, and the two commands that had been ignoring `'ignorecase'` all
+along.
+
+- **What shipped:** `'smartcase'` (off, vim's default): with `'ignorecase'` on, a
+  pattern with an upper case letter in it is taken literally. `/Foo` finds `Foo`
+  and `/foo` finds either — and the rule is vim's own list: `/`, `?`, `n`, `N`,
+  `:g` and `:s`.
+- **What the work found:** `:s` and `:g` matched case-sensitively whatever
+  `'ignorecase'` said. Nobody had noticed because `/` was the way the setting was
+  ever exercised, and `:s` reads *its own* flags — the flags decide, and the
+  setting is what they decide *about*. A substitute now takes the settings as the
+  default and keeps its `i`, and gained vim's `I` ("case matters here") so both
+  directions can be said.
+- **Constraints it had to respect, and how:** the case rule needs the pattern,
+  and the pattern is only known *after* the parse that needs it — so the rule is
+  one free function, `search::ignore_case_for(pattern, ignorecase, smartcase)`,
+  called by the search path and by `Substitute::parse` alike. The substitute has
+  no editor to ask, which is what made it a free function rather than a method;
+  the order the three ways of saying it are applied is: the settings, then the
+  `i`/`I` flag, then a `\c`/`\C` in the pattern, because the most specific thing
+  said should win.
+- **Files:** `inkstone-core` (`settings.rs`, `search::ignore_case_for`,
+  `Substitute::parse`'s two new parameters and its `I` flag, `prompt.rs`'s
+  `search_ignore_case`, `run_global`'s compile).
+- **Left for later:** `'ignorecase'` in the completion popup's own filtering
+  (vim's list mentions it), and `'tagcase'`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

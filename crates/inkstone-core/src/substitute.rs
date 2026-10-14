@@ -94,7 +94,13 @@ impl Substitute {
     }
 
     /// Parse a `:` line that `Substitute::looks_like` accepted.
-    pub fn parse(line: &str) -> Result<Self, SubstituteError> {
+    ///
+    /// `ignorecase` and `smartcase` are the settings: vim's `'ignorecase'` is
+    /// used for `:s` as much as for `/`, and `'smartcase'` takes it back for a
+    /// pattern with an upper case letter in it. The `i` and `I` flags settle it
+    /// either way, and a `\c` or `\C` in the pattern settles it last, being the
+    /// most specific thing said.
+    pub fn parse(line: &str, ignorecase: bool, smartcase: bool) -> Result<Self, SubstituteError> {
         let rest = strip_range(line).ok_or(SubstituteError::Argument)?;
         let (from, to) = address_range(line);
         let Some(rest) = rest.strip_prefix('s') else {
@@ -116,12 +122,15 @@ impl Substitute {
         }
 
         let mut all = false;
-        let mut ignore_case = false;
+        let mut forced: Option<bool> = None;
         let mut confirm = false;
         for flag in flags.chars() {
             match flag {
                 'g' => all = true,
-                'i' => ignore_case = true,
+                'i' => forced = Some(true),
+                // `:s/one/two/I` is vim's way of saying "case matters here" when
+                // `'ignorecase'` is on.
+                'I' => forced = Some(false),
                 // `c` asks before each match. It is the one flag that cannot be
                 // carried out inside one command: the answers are keys.
                 'c' => confirm = true,
@@ -133,6 +142,8 @@ impl Substitute {
         // `\c` in it decides case the way the `i` flag does — with the pattern
         // winning, since it is the more specific of the two.
         let translated = crate::dialect::translate(&pattern).map_err(SubstituteError::Dialect)?;
+        let mut ignore_case = forced
+            .unwrap_or_else(|| crate::search::ignore_case_for(&pattern, ignorecase, smartcase));
         if let Some(forced) = translated.ignore_case {
             ignore_case = forced;
         }
@@ -367,7 +378,7 @@ mod tests {
 
     #[test]
     fn the_parts_of_a_line_are_the_pattern_the_replacement_and_the_flags() {
-        let spec = Substitute::parse("%s/one/two/g").expect("parses");
+        let spec = Substitute::parse("%s/one/two/g", false, false).expect("parses");
         assert_eq!(
             spec,
             Substitute {
@@ -381,7 +392,7 @@ mod tests {
             }
         );
 
-        let spec = Substitute::parse("s/one/two/").expect("parses");
+        let spec = Substitute::parse("s/one/two/", false, false).expect("parses");
         assert!(!spec.all);
         assert_eq!(
             (spec.from, spec.to),
@@ -389,38 +400,38 @@ mod tests {
             "no range is the cursor's line"
         );
 
-        let spec = Substitute::parse(".s/one/two/gi").expect("parses");
+        let spec = Substitute::parse(".s/one/two/gi", false, false).expect("parses");
         assert!(spec.all && spec.ignore_case);
         assert_eq!(
             (spec.from, spec.to),
             (Some(Address::Current), Some(Address::Current))
         );
 
-        let spec = Substitute::parse("s/one/two/gc").expect("parses");
+        let spec = Substitute::parse("s/one/two/gc", false, false).expect("parses");
         assert!(spec.all && spec.confirm, "`c` asks about every match");
 
         // Line numbers, both ends, and the two addresses with meanings.
-        let spec = Substitute::parse("5,10s/a/b/").expect("parses");
+        let spec = Substitute::parse("5,10s/a/b/", false, false).expect("parses");
         assert_eq!(
             (spec.from, spec.to),
             (Some(Address::Line(5)), Some(Address::Line(10)))
         );
-        let spec = Substitute::parse("%s/a/b/").expect("parses");
+        let spec = Substitute::parse("%s/a/b/", false, false).expect("parses");
         assert_eq!(
             (spec.from, spec.to),
             (Some(Address::Line(1)), Some(Address::Last))
         );
-        let spec = Substitute::parse(".,$s/a/b/").expect("parses");
+        let spec = Substitute::parse(".,$s/a/b/", false, false).expect("parses");
         assert_eq!(
             (spec.from, spec.to),
             (Some(Address::Current), Some(Address::Last))
         );
-        let spec = Substitute::parse("$s/a/b/").expect("parses");
+        let spec = Substitute::parse("$s/a/b/", false, false).expect("parses");
         assert_eq!(
             (spec.from, spec.to),
             (Some(Address::Last), Some(Address::Last))
         );
-        let spec = Substitute::parse("3,7s/a/b/").expect("parses");
+        let spec = Substitute::parse("3,7s/a/b/", false, false).expect("parses");
         assert_eq!(
             (spec.from, spec.to),
             (Some(Address::Line(3)), Some(Address::Line(7)))
@@ -438,31 +449,58 @@ mod tests {
     #[test]
     fn a_delimiter_can_be_anything_that_is_not_a_letter() {
         assert_eq!(
-            Substitute::parse("s|a/b|c|").expect("parses").pattern,
+            Substitute::parse("s|a/b|c|", false, false)
+                .expect("parses")
+                .pattern,
             "a/b",
             "a delimiter is what lets a pattern contain a slash"
         );
         assert_eq!(
-            Substitute::parse("s#one#two#").expect("parses").replacement,
+            Substitute::parse("s#one#two#", false, false)
+                .expect("parses")
+                .replacement,
             "two"
         );
         // An escaped delimiter is the delimiter itself.
         assert_eq!(
-            Substitute::parse("s/a\\/b/c/").expect("parses").pattern,
+            Substitute::parse("s/a\\/b/c/", false, false)
+                .expect("parses")
+                .pattern,
             "a/b"
         );
     }
 
     #[test]
     fn the_trailing_delimiter_and_the_replacement_may_be_left_off() {
-        assert_eq!(Substitute::parse("s/one").expect("parses").pattern, "one");
-        assert_eq!(Substitute::parse("s/one").expect("parses").replacement, "");
-        assert_eq!(Substitute::parse("s/one/").expect("parses").replacement, "");
         assert_eq!(
-            Substitute::parse("s/one/two").expect("parses").replacement,
+            Substitute::parse("s/one", false, false)
+                .expect("parses")
+                .pattern,
+            "one"
+        );
+        assert_eq!(
+            Substitute::parse("s/one", false, false)
+                .expect("parses")
+                .replacement,
+            ""
+        );
+        assert_eq!(
+            Substitute::parse("s/one/", false, false)
+                .expect("parses")
+                .replacement,
+            ""
+        );
+        assert_eq!(
+            Substitute::parse("s/one/two", false, false)
+                .expect("parses")
+                .replacement,
             "two"
         );
-        assert!(Substitute::parse("s/one/two/g").expect("parses").all);
+        assert!(
+            Substitute::parse("s/one/two/g", false, false)
+                .expect("parses")
+                .all
+        );
     }
 
     #[test]
@@ -494,28 +532,32 @@ mod tests {
     #[test]
     fn a_line_that_makes_no_sense_says_so() {
         assert_eq!(
-            Substitute::parse("s").unwrap_err(),
+            Substitute::parse("s", false, false).unwrap_err(),
             SubstituteError::Argument
         );
         assert_eq!(
-            Substitute::parse("s/one/two/x").unwrap_err(),
+            Substitute::parse("s/one/two/x", false, false).unwrap_err(),
             SubstituteError::Flag('x')
         );
         assert_eq!(
-            Substitute::parse("s/one/two/g/i").unwrap_err(),
+            Substitute::parse("s/one/two/g/i", false, false).unwrap_err(),
             SubstituteError::Flag('/'),
             "a fourth part is trailing characters"
         );
         assert_eq!(
-            Substitute::parse("s\\one\\two\\").unwrap_err(),
+            Substitute::parse("s\\one\\two\\", false, false).unwrap_err(),
             SubstituteError::Delimiter('\\')
         );
         assert_eq!(
-            Substitute::parse("s/one/two/x").unwrap_err().to_string(),
+            Substitute::parse("s/one/two/x", false, false)
+                .unwrap_err()
+                .to_string(),
             "E488: Trailing characters: x"
         );
         assert_eq!(
-            Substitute::parse("s").unwrap_err().to_string(),
+            Substitute::parse("s", false, false)
+                .unwrap_err()
+                .to_string(),
             "E471: Argument required"
         );
     }

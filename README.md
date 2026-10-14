@@ -335,6 +335,12 @@ it starts on.
 file comes round again. `:set nowrapscan` is what makes `n` past the last match
 say `E486: Pattern not found` instead of silently starting over.
 
+`'ignorecase'` makes a search ignore case, and `'smartcase'` takes that back
+when the pattern has an upper case letter in it — `/Foo` finds `Foo`, `/foo`
+finds either. All three of `/`, `?`, `:s` and `:g` obey both, and a substitute's
+`i` flag means "ignore case here" while `I` means "case matters here", whichever
+way the settings point.
+
 `'incsearch'` is on: the cursor goes to the match as the pattern is typed, and
 the cursor is drawn there rather than on the line being typed, so a search is
 aimed rather than committed blind. `<Enter>` accepts it where the preview put the
@@ -691,7 +697,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` and `foldminlines` (integers), `foldnestmax` (an integer) and `foldignore` (characters) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` and `foldminlines` (integers), `foldnestmax` (an integer) and `foldignore` (characters) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

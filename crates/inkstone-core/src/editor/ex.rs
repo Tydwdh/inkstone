@@ -550,7 +550,13 @@ impl Editor {
     /// row's one line rather than by running it per line: the matching lines are
     /// collected into that line, the way `:diagnostics` lists what it has.
     pub(crate) fn run_global(&mut self, spec: &crate::global::Global) {
-        let pattern = match regex::RegexBuilder::new(&spec.pattern).build() {
+        // `:g` is a search over lines, so `'ignorecase'` and `'smartcase'` are
+        // the ones a `/` would use — vim's own list for `'smartcase'` names it.
+        let ignore_case = self.search_ignore_case(&spec.pattern);
+        let pattern = match regex::RegexBuilder::new(&spec.pattern)
+            .case_insensitive(ignore_case)
+            .build()
+        {
             Ok(pattern) => pattern,
             Err(error) => {
                 self.message = crate::search::PatternError::from(error).to_string();

@@ -62,6 +62,17 @@ impl From<regex::Error> for PatternError {
 
 /// A search: the pattern as it was typed, and where it matches.
 ///
+/// The case rule the two settings make, for a pattern that is already known.
+///
+/// `'ignorecase'` says to ignore case; `'smartcase'` takes that back when the
+/// pattern itself has an upper case letter in it, which is what makes `/Foo`
+/// find `Foo` and `/foo` find either. Vim applies this to `/`, `?`, `n`, `N`,
+/// `:g` and `:s`, so it is a free function rather than a method: the substitute
+/// parses its own pattern and has no editor to ask.
+pub(crate) fn ignore_case_for(pattern: &str, ignorecase: bool, smartcase: bool) -> bool {
+    ignorecase && !(smartcase && pattern.chars().any(char::is_uppercase))
+}
+
 /// The matches are recomputed after every edit, because they are character
 /// ranges and every edit moves them. The *compiled* pattern is kept, because
 /// compiling one is the expensive part and an edit does not change it.

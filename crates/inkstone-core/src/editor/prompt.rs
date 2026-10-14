@@ -157,7 +157,7 @@ impl Editor {
     /// `<Enter>` means in vim; with nothing to repeat it says so rather than
     /// doing nothing quietly.
     pub(crate) fn run_search(&mut self, pattern: &str, direction: Direction) {
-        let ignore_case = self.options.borrow().ignorecase;
+        let ignore_case = self.search_ignore_case(pattern);
         // Using a search brings the highlighting back: `:nohlsearch` is about
         // the display, not about the pattern.
         self.search_highlight_on();
@@ -235,6 +235,13 @@ impl Editor {
         self.after_edit();
     }
 
+    /// Whether a search for `pattern` ignores case: `'ignorecase'`, unless
+    /// `'smartcase'` and an upper case letter in the pattern take it back.
+    pub(crate) fn search_ignore_case(&self, pattern: &str) -> bool {
+        let options = self.options.borrow();
+        crate::search::ignore_case_for(pattern, options.ignorecase, options.smartcase)
+    }
+
     /// Whether the matches of the search are drawn: `'hlsearch'` unless
     /// `:nohlsearch` has turned them off since the last search.
     pub(crate) fn search_is_highlighted(&self) -> bool {
@@ -291,7 +298,7 @@ impl Editor {
             }
         };
         let pattern = self.cmdline.clone();
-        let ignore_case = self.options.borrow().ignorecase;
+        let ignore_case = self.search_ignore_case(&pattern);
         // A pattern that does not compile, or one that matches nothing, shows
         // nothing and says nothing: this is not the search yet, and a `:` line
         // that complained on every keystroke would be unusable.
@@ -389,7 +396,7 @@ impl Editor {
         }
         match preview.previous {
             Some((pattern, direction)) => {
-                let ignore_case = self.options.borrow().ignorecase;
+                let ignore_case = self.search_ignore_case(&pattern);
                 let _ = self
                     .search
                     .run(&self.buffer, &pattern, direction, ignore_case);

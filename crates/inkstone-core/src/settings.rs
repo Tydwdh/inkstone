@@ -171,6 +171,8 @@ settings! {
     Number as number: bool = false,
     /// Whether a search ignores case.
     IgnoreCase as ignorecase: bool = false,
+    /// Whether an upper case letter in the pattern takes `'ignorecase'` back.
+    SmartCase as smartcase: bool = false,
     /// Whether every match of the search is highlighted.
     ///
     /// Vim has this off by default and this editor has always highlighted

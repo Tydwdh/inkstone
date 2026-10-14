@@ -26,6 +26,13 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `'smartcase'`: with `'ignorecase'` on, a pattern that has an upper case letter
+  in it is taken literally — `/Foo` finds `Foo`, `/foo` finds either. It applies
+  to `/`, `?`, `n`, `N`, `:g` and `:s`, which is vim's own list for it.
+- `'ignorecase'` now reaches `:s` and `:g`, which had been matching case-
+  sensitively whatever the setting said. A substitute's `i` flag means "ignore
+  case here" and the new `I` flag means "case matters here", so a pattern can
+  still say what it wants either way round.
 - `'foldminlines'`, the last setting of the fold family: a fold is *displayed*
   closed only when it is longer than that many lines, so a two-line fold shows
   both of its lines with `:set foldminlines=2`. The fold itself is still closed —

@@ -407,6 +407,21 @@ pub enum List {
     Searches,
 }
 
+impl List {
+    /// Whether this list is *text* rather than a report.
+    ///
+    /// The two histories are what a person typed, so the window that shows them
+    /// is a window like any other and the text in it can be edited — vim's
+    /// command-line window: "you can now use commands to move around and edit the
+    /// text in the window", and what is not run is "discarded when closing the
+    /// window". The rest are derived from something else — a server's answer, the
+    /// settings — and a list that can be edited is a list that can lie about what
+    /// it says.
+    pub fn is_editable(self) -> bool {
+        matches!(self, List::Commands | List::Searches)
+    }
+}
+
 /// A look at a document: where the cursor is in it, and where the window is
 /// scrolled to.
 ///

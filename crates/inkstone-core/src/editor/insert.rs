@@ -5,6 +5,7 @@ use crate::keymap::{encode_key, Lookup};
 use crate::mode::Mode;
 
 use super::*;
+use crate::editor::List;
 
 impl Editor {
     /// Type what an insert session typed, and leave insert mode.
@@ -145,6 +146,13 @@ impl Editor {
         }
         match key.code {
             KeyCode::Esc => self.run_command("escape", &[]),
+            // In a history window `<CR>` runs the line under the cursor — vim's
+            // command-line window: "Works both in Insert and in Normal mode" —
+            // where anywhere else it is the newline insert mode always types.
+            KeyCode::Enter if self.list.is_some_and(List::is_editable) => {
+                self.run_command("escape", &[]);
+                self.run_history_line();
+            }
             KeyCode::Enter => self.type_text("\n"),
             KeyCode::Tab => self.type_text("\t"),
             KeyCode::Backspace => self.delete_backward(),

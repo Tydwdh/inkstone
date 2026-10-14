@@ -22,9 +22,10 @@ impl Editor {
         text: &str,
         after: Option<usize>,
     ) {
-        if self.list.is_some() {
+        if self.list.is_some_and(|list| !list.is_editable()) {
             // A list that can be edited is a list that can lie about what it
-            // says.
+            // says. The two *histories* are the exception: what they hold is what
+            // a person typed, and editing it is the point of the window.
             self.message = "E21: Cannot make changes, 'readonly' option is set".to_string();
             return;
         }

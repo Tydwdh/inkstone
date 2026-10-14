@@ -26,6 +26,14 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- The `q:` and `q/` windows can be *edited* — vim's command-line window, "you can
+  now use commands to move around and edit the text in the window" — and `<CR>`
+  runs the line under the cursor in insert mode as well as in normal mode, which
+  is what the manual says and what a person typing in that window expects. What
+  was edited but not run goes with the window. The other lists (a server's
+  answers, the settings) stay read-only: a list that can be edited is a list that
+  can lie about what it says.
+- `'cmdwinheight'` says how many screen lines that window uses, seven by default.
 - `'suffixesadd'`: suffixes `gf` tries when the name as written is not there, so
   `:set suffixesadd=.rs` finds `main.rs` from `main`. The name as written is
   looked for over every `'path'` entry first, so what a person typed wins over

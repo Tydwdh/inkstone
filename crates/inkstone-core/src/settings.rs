@@ -221,6 +221,8 @@ settings! {
     /// what `#` is for in C — a preprocessor line is not indented like the code
     /// inside it. Empty by default, as in vim.
     FoldIgnore as foldignore: String = String::new(),
+    /// How many screen lines the command-line window uses — `q:` and `q/`.
+    CmdWinHeight as cmdwinheight: Count = Count(7),
     /// Suffixes tried when `gf` does not find the name it was given, as a
     /// comma-separated list: `:set suffixesadd=.rs` finds `main.rs` from `main`.
     SuffixesAdd as suffixesadd: String = String::new(),

@@ -3018,6 +3018,34 @@ name in a comment is a name without its extension as often as not.
   design as `'foldtext'`; `~user` and environment-variable expansion in a name;
   and the visual-mode `gf`, which uses the selection rather than `isfname`.
 
+## Done — the command-line window can be edited
+
+`q:` and `q/` showed the history and ran a line of it; what they could not do was
+what vim's command-line window is *for*: edit the line before running it.
+
+- **What shipped:** the two history windows are editable — "you can now use
+  commands to move around and edit the text in the window" — and `<CR>` runs the
+  line under the cursor "both in Insert and in Normal mode", which the manual says
+  and which a person typing in that window expects. What was edited but not run
+  goes with the window: "other text edits are discarded when closing the window".
+  `'cmdwinheight'` says how tall the window is.
+- **Constraints it had to respect, and how:** the read-only rule that protects
+  every other list — "a list that can be edited is a list that can lie about what
+  it says" — is still true, so it moved onto the *list* (`List::is_editable`)
+  rather than staying a blanket refusal in `replace_range`. The two histories are
+  what a person typed; the places, the diagnostics and the settings are derived
+  from something else, and editing those would leave the list and the truth
+  saying different things.
+- **The arithmetic worth writing down:** `'cmdwinheight'` counts *screen* lines,
+  which is the window's rows with its status line, while a resize sets the text
+  rows — so the window is one row shorter than the setting, and the test says so.
+- **Files:** `inkstone-core` (`List::is_editable`, `replace_range`'s refusal,
+  `run_history_line`, the insert-mode `<CR>`, `'cmdwinheight'` and the resize in
+  `open_history_window`).
+- **Left for later:** `<C-c>` (continue in Command-line mode with the line under
+  the cursor), the `E11`/`E1188` restrictions on moving to another window from
+  there, and `'cedit'` for opening the window from the command line.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

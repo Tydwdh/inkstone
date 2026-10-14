@@ -208,3 +208,46 @@ fn a_save_keeps_the_history_but_a_reload_forgets_it() {
         "a reload starts a fresh history"
     );
 }
+
+#[test]
+fn the_history_window_can_be_edited() {
+    // vim's command-line window: "you can now use commands to move around and
+    // edit the text in the window", and what is not run is "discarded when
+    // closing the window". The *other* lists stay read-only — a list that can be
+    // edited is a list that can lie about what it says.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\n");
+    ed.viewport = crate::screen::Viewport::new(40, 12);
+    // Two-key sequences are fed a key at a time: `q` waits for the key that says
+    // which history is wanted.
+    feed(&mut ed, ":set number<Enter>");
+    feed(&mut ed, "q");
+    feed(&mut ed, ":");
+    assert_eq!(ed.list, Some(List::Commands), "the command window is up");
+    let height = ed.window_rects().last().expect("a window").height;
+    assert_eq!(height, 7, "'cmdwinheight' says how tall it is");
+
+    // Editing a line in it works, and the line `<CR>` runs is the edited one.
+    ed.cursor = Cursor::new(0, 0);
+    feed(&mut ed, "A!");
+    assert!(
+        ed.buffer.text().starts_with("set number!"),
+        "the line was edited: {}",
+        ed.buffer.text()
+    );
+    feed(&mut ed, "<Enter>");
+    assert_eq!(ed.list, None, "the window went away");
+    assert_eq!(ed.mode, Mode::Normal);
+
+    // A settings list is a report, and stays read-only.
+    ed.execute_cmdline("set all");
+    assert_eq!(ed.list, Some(List::Settings));
+    let before = ed.buffer.text();
+    feed(&mut ed, "x");
+    assert_eq!(
+        ed.message,
+        "E21: Cannot make changes, 'readonly' option is set"
+    );
+    assert_eq!(ed.buffer.text(), before, "nothing changed");
+    assert!(List::Commands.is_editable() && !List::Settings.is_editable());
+}

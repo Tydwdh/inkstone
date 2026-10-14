@@ -202,7 +202,42 @@ impl Editor {
         self.documents.push(document);
         let index = self.documents.len() - 1;
         self.split_window(Axis::Rows, Some(index));
+        // "Number of screen lines to use for the command-line window": the split
+        // picks a size of its own, and the setting is what says how tall the
+        // window a person is going to read should be.
+        // The setting counts *screen* lines — the window's rows with its status
+        // line, vim's own arithmetic — and a resize sets the text rows, so the
+        // status line is taken off here.
+        let height = self
+            .options
+            .borrow()
+            .cmdwinheight
+            .0
+            .max(2)
+            .min(u16::MAX as usize) as u16;
+        self.resize_window(Axis::Rows, Resize::Set(height - 1));
         self.message = format!("{count} command{}", if count == 1 { "" } else { "s" });
+    }
+
+    /// Run the line the cursor is on in a history window, and close it.
+    ///
+    /// The line is run as if it had been typed at the prompt it came from: a
+    /// command for `q:`, a search for `q/`. What was edited but not run goes with
+    /// the window — "other text edits are discarded when closing the window".
+    pub(crate) fn run_history_line(&mut self) {
+        let row = self.cursor.row;
+        let line = self.buffer.line_string(row).trim().to_string();
+        if line.is_empty() {
+            return;
+        }
+        let searches = self.list == Some(List::Searches);
+        let window = self.current_window;
+        self.close_window(window);
+        if searches {
+            self.run_search(&line, crate::search::Direction::Forward);
+        } else {
+            self.execute_cmdline(&line);
+        }
     }
 
     /// Show every setting and its value, in a window of its own.
@@ -280,23 +315,11 @@ impl Editor {
     /// list of places.
     pub(crate) fn open_place_at_cursor(&mut self) {
         // A history window is a list of things to do again rather than places to
-        // go to, so `<CR>` runs the line the cursor is on — vim's `q:`.
-        if matches!(self.list, Some(List::Commands) | Some(List::Searches)) {
-            let row = self.cursor.row;
-            let line = self.buffer.line_string(row).trim().to_string();
-            if line.is_empty() {
-                return;
-            }
-            let searches = self.list == Some(List::Searches);
-            let window = self.current_window;
-            self.close_window(window);
-            // The line is run as if it had been typed at the prompt it came from:
-            // a command for `q:`, a search for `q/`.
-            if searches {
-                self.run_search(&line, crate::search::Direction::Forward);
-            } else {
-                self.execute_cmdline(&line);
-            }
+        // go to, so `<CR>` runs the line the cursor is on — vim's `q:`. "Works
+        // both in Insert and in Normal mode", which is why this is a method of
+        // its own rather than part of the normal-mode key handling.
+        if self.list.is_some_and(List::is_editable) {
+            self.run_history_line();
             return;
         }
         if self.list.is_none() {

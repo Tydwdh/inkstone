@@ -405,10 +405,12 @@ it, which is the one place a key means two things: `q:` and `q/` are the history
 windows, and a recording ends before either can be reached.
 
 `q:` opens what has been typed on the `:` line in a window of its own, oldest first,
-and `q/` the same for searches. `<CR>` on a line runs it again — a command for `q:`,
-a search for `q/` — and the window goes away, so what the command did is not half a
-screen down. A command run from a script is not in the history: it is what a *person*
-typed.
+and `q/` the same for searches. It is a window like any other: the lines in it can be
+edited, and `<CR>` runs the one under the cursor — a command for `q:`, a search for
+`q/`, and it works in insert mode too. The window goes away when a line is run, so
+what the command did is not half a screen down, and an edit that is not run goes with
+it. `'cmdwinheight'` says how tall the window is. A command run from a script is not
+in the history: it is what a *person* typed.
 
 `gf` opens the file whose name is under the cursor — read as a *file name* rather
 than as a word, so `src/main.rs` is one name and not three. It is looked for beside
@@ -724,7 +726,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` and `foldminlines` (integers), `foldnestmax` (an integer), `foldignore` (characters) and `suffixesadd` (a comma-separated list) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel`, `foldminlines` and `cmdwinheight` (integers), `foldnestmax` (an integer), `foldignore` (characters) and `suffixesadd` (a comma-separated list) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

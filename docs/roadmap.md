@@ -4,6 +4,10 @@ What is done, what is next, and what each next thing has to respect. The
 constraints are the useful half: they are the invariants from
 [`ARCHITECTURE.md`](../ARCHITECTURE.md) applied to work that does not exist yet.
 
+Each entry is a snapshot of the work at the moment it was written: its *Left for
+later* says what was still open **then**, and a later entry may have shipped it —
+the newest state of the project is the last entry, not the first.
+
 ## Done — milestone 1, the walking skeleton
 
 Headless daemon plus dumb crossterm frontend over MessagePack on stdio; a rope
@@ -2623,7 +2627,3 @@ clipboard.
   [`rendering.md`](rendering.md) if that ever matters.
 - Highlighting is per line and the state is per line, so a change high in a large
   file still costs the states from there down — lazily, but linearly.
-- No file-change detection: if another process writes the file, `:w` overwrites
-  it without asking.
-- Undo has no save point, so undoing back to what is on disk still counts as
-  modified.

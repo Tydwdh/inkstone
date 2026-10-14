@@ -52,10 +52,10 @@ bit, so a renderer that can draw more can say so), and `ClientMsg::Text` carries
 text that was never a key, which is what an input method commits and what a paste
 is. A windowed frontend needs nothing else from the wire.
 
-What remains is the frontend itself: shaping and font fallback (cosmic-text does
-it), IME plumbing, selection and clipboard, mouse reporting, key repeat, and
-knowing what a "line" is on screen. That is the real cost of a windowed frontend,
-not the GPU calls.
+What remained was the frontend itself: shaping and font fallback (cosmic-text
+does it), IME plumbing, selection and clipboard, mouse reporting, key repeat, and
+knowing what a "line" is on screen. That was the real cost of a windowed
+frontend, not the GPU calls — and the next section is what came of it.
 
 ## `inkstone-gui`
 
@@ -92,9 +92,8 @@ in `inkstone-core` and nothing in the protocol's shape had to change for it.
   the same file — both compose the same grid, so the screens are comparable cell
   by cell.
 
-Still missing, and each its own change: selection and clipboard, mouse
-reporting, key repeat for held keys, and smooth scrolling. None of them needs
-the wire to change.
+Still missing, and each its own change: key repeat for held keys, and smooth
+scrolling. Neither needs the wire to change.
 
 ## What stays true
 

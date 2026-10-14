@@ -18,39 +18,50 @@ inkstone  (crossterm frontend)  ──msgpack over stdio──▶  inkstone-serv
 ```
 
 The daemon composes the screen as a grid of styled cells; the frontend blits
-it. No editor state lives in the frontend, so a future GUI or a remote client
-can reuse the daemon unchanged.
+it. No editor state lives in the frontend, so a second frontend — `inkstone-gui`
+today, a remote client tomorrow — reuses the daemon unchanged.
 
 ## Status
 
-Milestone 1: a walking skeleton. It is usable for basic editing, and
-deliberately thin.
+A working editor rather than a skeleton: it is usable for real editing and thin
+on purpose — every feature is a command in the kernel and a key on the way to
+it, not a frontend of its own.
 
 Working: open/save, modal editing, movement (with counts: `3x`, `2dd`, `5j`),
 insert, `x`, the operators `d`, `y` and `c` with a motion (`dw`, `d$`, `yy`,
-`3dd`, `cw`) or a text object (`diw`, `ci"`, `ya{`), visual mode (`v` and `V`
-with the same operators), registers (`p`, `P`, `"ayy`, `"ap`, `"_dd`, `"0p`,
-`"+y`, `:reg`), search (`/`, `?`, `n`, `N`, `*`, `#`, with every match
-highlighted) and regular-expression replace (`:s`, `:%s`), syntax highlighting
-for Rust, the C family, Python, shells, TOML/YAML/INI and JSON, undo (`u`) and redo (`<C-r>`), several files at once
-(`:e`, `:ls`, `:b`, `:bn`, `:bp`, `:bd`) in several windows (`:sp`, `:vs`,
-`<C-w>`) and tabs (`:tabnew`, `gt`, `:tabclose`), mouse selection and the clipboard, command-line editing with history
-and multi-key insert mappings, Lua configuration (`init.lua`), line numbers,
-tabstop, status line, `.` to do the last change again, and `f`/`t`/`F`/`T`
-character finds.
+`3dd`, `cw`) or a text object (`diw`, `ci"`, `ya{`, `dip`), visual mode (`v`,
+`V`, and a `<C-v>` rectangle, with the same operators), registers (`p`, `P`,
+`"ayy`, `"ap`, `"_dd`, `"0p`, `"+y`, `:reg`), search (`/`, `?`, `n`, `N`, `*`,
+`#`, with every match highlighted) and regular-expression replace (`:s`,
+`:%s`, with ranges, `:&` and the `c` flag) in vim's own pattern dialect, syntax
+highlighting for Rust, the C family, Python, shells, TOML/YAML/INI, JSON,
+Markdown and HTML (fenced blocks and `<script>` bodies in their own language),
+undo (`u`) and redo (`<C-r>`), with the state a file was written in remembered
+so undoing back to it clears the modified marker, several files at once (`:e`,
+`:ls`, `:b`, `:bn`, `:bp`, `:bd`) in several windows (`:sp`, `:vs`, `<C-w>`,
+resizable and draggable) and tabs (`:tabnew`, `gt`, `:tabclose`), folds (`zf`,
+`zo`, `zc`, `'foldmethod'`), keyboard macros (`q`, `@`), marks, a jump list
+(`<C-o>`, `<C-i>`) and a change list (`g;`, `g,`), mouse selection and the
+clipboard, command-line editing with history and multi-key insert mappings,
+language-server answers when one is running (diagnostics, `K`, `gd`, `gr`,
+completion with snippets, `<C-k>`, `:format`), Lua configuration (`init.lua`),
+line numbers, tabstop, status line, `.` to do the last change again, and
+`f`/`t`/`F`/`T` character finds.
 
 Two frontends draw it: `inkstone` in a terminal, and `inkstone-gui` in a window,
 where the screen is drawn on the GPU and an input method works in insert mode.
 Both are the same program below the drawing, and both take a click: a drag
 selects, `<C-c>` copies to the system clipboard, and the wheel scrolls.
 
-Not implemented: LSP, completion, tabs, resizing a split, and `:s` with line
-ranges.
+Not implemented: `\zs` and `\ze` in a pattern — refused rather than
+mistranslated — search as the pattern is typed, and double-click word
+selection. [`docs/roadmap.md`](docs/roadmap.md) lists the rest, with what each
+thing would have to respect.
 
 ## Build and run
 
-Both binaries must end up in the same directory: `inkstone` finds `inkstone-server`
-next to itself.
+`inkstone` looks for `inkstone-server` beside itself first — which is what
+`cargo build --workspace` leaves — and then on `PATH`.
 
 ```sh
 cargo build --workspace
@@ -341,7 +352,9 @@ column while it is on a fold line (its own column is left alone), and a substitu
 range is widened to any closed fold it touches — `:s/foo/bar/g` with the cursor on a closed fold
 replaces in every line of the fold, which is vim's own example. Folds hold *line numbers*, and
 the editor keeps them up to date as lines are added and taken away, so a fold stays on
-the text it was put on. `'foldmethod'` is manual only.
+the text it was put on. `'foldmethod'` is `manual` — folds you make with `zf`
+are what there is — or `indent`, which works them out from the indentation and
+again on `zx`.
 
 `q{register}` records what you type into a register, `q` stops the recording, and
 `@{register}` plays it back — through the same state machine every key goes through,
@@ -455,8 +468,9 @@ how a `:s/x/y/g` gets used on the next line.
 
 A language server can be spoken to, and the editor will do it: set `lsp` to true
 (`ed.set("lsp", true)` in `init.lua`) and the daemon starts a server for the file
-that is open — `rust-analyzer` for Rust, `pyright`/`pylsp` for Python,
-`typescript-language-server` for JavaScript and TypeScript, `gopls` for Go —
+that is open — `rust-analyzer` for Rust, `pyright-langserver --stdio` or `pylsp`
+for Python, `typescript-language-server --stdio` for JavaScript and TypeScript,
+`gopls` for Go —
 finding it on `PATH`, saying who it is, telling it what is open and what changed,
 and putting what it pushes back where the diagnostics above are drawn from. It is
 off by default: starting a process is a bigger thing than a colour. The client
@@ -608,7 +622,8 @@ range can say which lines instead: `:5s/…`, `:2,3s/…`, `:.,$s/…`, `:$s/…
 the way to walk down a file a match at a time. With the `c` flag `:s` asks about
 each match instead of deciding for you: `y` replaces, `n` skips, `a` replaces the
 rest, `q` stops, and the whole conversation is one `u`. The
-delimiter can be anything that is not a letter (`:s|/usr/bin|/opt/bin|`), `g`
+delimiter can be anything that is not a letter, a digit or a backslash
+(`:s|/usr/bin|/opt/bin|`), `g`
 takes every match on a line, `i` ignores case, `&` in the replacement is the
 whole match and `\1` the first group. It reports how many places it changed and
 is one `u` to undo.
@@ -640,7 +655,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` (an integer), `foldnestmax` (an integer) and `foldignore` (characters) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until
@@ -680,7 +695,7 @@ The suite includes a deterministic 4000-keystroke stress test that re-checks
 the buffer and viewport invariants after every key, and an end-to-end test that
 drives the real daemon binary over its pipes and inspects the bytes it writes.
 The window model is written up in `docs/windows.md`, alongside the notes on
-buffers, undo, selection, highlighting and rendering.
+buffers, undo, selection, highlighting, rendering and the language server.
 
 The keymap table above is compared against the built-in bindings by
 `keymap::tests::the_readme_keymap_table_matches_the_defaults`, so it cannot

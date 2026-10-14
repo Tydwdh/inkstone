@@ -2,9 +2,10 @@
 
 Orientation for a new contributor — human or agent — picking this up cold.
 [`README.md`](README.md) is for users, [`ARCHITECTURE.md`](ARCHITECTURE.md) is
-the contract, [`docs/roadmap.md`](docs/roadmap.md) is what comes next, and
-[`docs/rendering.md`](docs/rendering.md) is what the wire carries and what a
-second frontend needs. This file is how to work on it without breaking it.
+the contract, [`docs/roadmap.md`](docs/roadmap.md) is what is done and what
+comes next, and the design notes under [`docs/`](docs) — `undo`, `windows`,
+`buffers`, `selection`, `highlighting`, `rendering`, `lsp` — are how each of
+those areas was decided. This file is how to work on it without breaking it.
 
 ## The one-paragraph summary
 
@@ -24,7 +25,8 @@ cargo fmt --all --check
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 ```
 
-All five run in CI on Windows and Linux. **Run all five before committing.** A
+All five run in CI — the build and the tests on Windows and Linux, fmt, clippy
+and doc on Linux. **Run all five before committing.** A
 change is not done because it compiles; the gate is the definition of done.
 
 Check the **exit status** of each. Grepping for the absence of a warning also
@@ -37,7 +39,7 @@ built, because the frontend looks for the daemon next to its own executable —
 
 ## What is not tested, and how to check it
 
-The kernel, the protocol and the daemon are covered by 467 tests, including one
+The kernel, the protocol and the daemon are covered by 539 tests, including one
 that drives the real daemon binary over pipes and inspects the bytes it writes.
 **A frontend's drawing is not covered by CI and cannot be**: raw mode needs a
 real terminal, and a window needs a real window. Both the window's metrics and

@@ -46,10 +46,13 @@ Two rules, in order, applied to every edit:
 
 The second rule matters because the first cannot always apply: `cw` deletes the
 word and then types the new one, and those two steps do not touch the same place
-in a way absorb can join. The fold is exact where it applies and gives up where
-it cannot be — steps that overlap (a script editing inside text it has just
-written) stay separate rather than becoming a step whose `removed` is a guess.
-An extra `u` is a smaller sin than an undo that corrupts the buffer.
+in a way absorb can join. Steps that *overlap* — a script editing inside text it
+has just written — cannot be joined that way either, since what the group
+removed is not the sum of what its steps removed. They are folded the other way
+round instead, by replaying the group backwards: the buffer becomes what it was
+before, the span is read there, and the one replacement it adds up to is what is
+left. Nothing here guesses — a `removed` that was a guess would be an undo that
+corrupts the buffer.
 
 ```
 ihello<Esc>   →  one step   (absorb: each keystroke continues the last)

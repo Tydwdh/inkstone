@@ -135,8 +135,9 @@ exactly.
 
 ## What is not here
 
-Resizing (`:resize`, dragging a separator), tabs, `:only` with unsaved buffers
-asking questions, per-window marks and folds, and the `'winminheight'` sort of
-option that decides how small a window may get. Two windows can also show the
-same document while its undo history is shared by both — which is correct, and
-means an undo in one window redraws the other.
+Per-window marks, and the `'winminheight'` sort of option that decides how small
+a window may get. `:only` closes the other windows without asking questions,
+where vim would ask: nothing is lost with the window, since the document it was
+showing stays open. Two windows can also show the same document while its undo
+history is shared by both — which is correct, and means an undo in one window
+redraws the other.

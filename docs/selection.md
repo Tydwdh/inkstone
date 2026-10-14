@@ -88,5 +88,5 @@ ServerMsg::Clipboard(s)  what to write: bytes, exactly as the buffer holds them
 - Nothing here needs a request id: every message is a notification in one
   direction, the way the rest of the protocol is. The daemon does not wait to be
   asked.
-- The pointer is optional. A frontend without one — the terminal, over `ssh` —
-  loses nothing but clicking.
+- The pointer is optional. A frontend that never sends one loses nothing but
+  clicking: nothing waits for it, and a click that never comes changes no screen.

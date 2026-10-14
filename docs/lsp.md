@@ -35,11 +35,14 @@ frontend ──stdin/stdout── daemon ──stdio── language server
                         inkstone-lsp: one thread per server
 ```
 
-The daemon's loop reads one client message at a time from the socket, which is a
-blocking read. A server that pushes `publishDiagnostics` has to be able to wake
-that loop, so the loop becomes a `select!` between the socket and the channel
-the server thread writes to — the daemon already depends on `crossbeam-channel`
-for exactly this kind of seam.
+The daemon's loop reads one client message at a time, but not from the socket
+directly: a spawned `inkstone-server-rpc-reader` thread blocks on the socket and
+pushes what it reads into one crossbeam channel, and the loop waits on that
+channel with a 10 ms timeout (`TICK`). A server that pushes
+`publishDiagnostics` has to be able to wake that loop, and this is what the
+timeout is for: a message from the client wakes it at once, and otherwise it
+looks at the server's own channel on the tick — the daemon already depends on
+`crossbeam-channel` for exactly this kind of seam.
 
 ## The protocol, as far as this needs it
 
@@ -47,8 +50,11 @@ Framing is the whole of the transport: `Content-Length: N\r\n\r\n` followed by
 `N` bytes of JSON. Two headers are allowed and one is used. Everything else is
 JSON-RPC 2.0 — requests with an `id`, notifications without one, and responses
 that carry either a result or an error. The client here is a *sender* of
-requests and a *receiver* of notifications, and the only notification it acts on
-at first is `textDocument/publishDiagnostics`.
+requests and a *receiver* of notifications, and it also files the answers: a
+request goes out with an id and what comes back is kept under that id, in
+`answers`, until the session asks for it — a server may answer before the client
+has looked. The only notification it acts on is
+`textDocument/publishDiagnostics`.
 
 The lifecycle, in order:
 
@@ -59,13 +65,16 @@ The lifecycle, in order:
 | `textDocument/didOpen` | client | the file's text, and its language |
 | `textDocument/publishDiagnostics` | server | the file's problems, whenever it likes |
 | `textDocument/didChange` | client | the whole text again, after an edit |
-| `textDocument/didSave` / `didClose` | client | what it says |
+| `textDocument/didClose` | client | the file went away |
 | `shutdown` / `exit` | client | the server is done |
 
-`didChange` sends the **whole text**, not a diff. Incremental sync is the
-server's stronger mode and a later optimisation: a document of a few megabytes
-costs one copy per save, and being wrong about an offset would be worse than
-being slow for a moment.
+`didChange` sends the **whole text**, not a diff. That copy is made on every
+*edit*, not every save: the document's edit count is what the server is told
+about, and `sync_lsp` compares it with the version the server holds, sending a
+full-text `didChange` whenever it moves. `didSave` is never sent. Incremental
+sync is the server's stronger mode and a later optimisation still: a document of
+a few megabytes costs one copy per edit, and being wrong about an offset would be
+worse than being slow for a moment.
 
 ## Positions, which are not ours
 
@@ -181,9 +190,10 @@ which is the same shape references have.
 
 ## What is deliberately not here
 
-Multiple servers for one file, `workspace/` symbols and edits, incremental sync,
-semantic tokens, folding, rename, code actions and signature help. Of the
-requests that *answer* something — completion, hover, definition — completion is
-the one worth doing first, and it is a change of its own: it needs a popup, which
-is a new thing to draw, and the popup has to be in the same place as the
-diagnostics: the kernel's grid.
+Multiple servers for one file, `workspace/` edits, incremental sync, semantic
+tokens, folding, rename and code actions. Of the requests that *answer*
+something — completion, hover, definition — completion was the one worth doing
+first, and it was a change of its own: it needed a popup, which is a new thing to
+draw, and the popup has to be in the same place as the diagnostics: the kernel's
+grid. That change has since been made, and the account of it is the section
+above.

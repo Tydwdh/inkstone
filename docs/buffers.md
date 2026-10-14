@@ -11,17 +11,20 @@ those fields belong to the file and which belong to the session?
 ```
 Editor
 ├── documents: Vec<Document>      every open file
-├── current: usize                which one is on screen
+├── windows, current_window       which window is on screen, and which
+│                                 document it shows
 ├── buffer, cursor, history,      the document that is on screen, live
-│   viewport, search, highlighter
+│   search, highlighter
+├── viewport                      how big the screen is; the scroll belongs
+│                                 to the window
 └── register, mode, keymap,       the session: what a key means, what was
     lua, cmdline, message,        yanked, what is being typed, what it said
     options, selection, …
 ```
 
 A `Document` is a buffer and everything that follows it through the file: the
-cursor, the history, the search and its matches, the highlighter and its per-line
-state, and where the window is scrolled to. Two documents share nothing that
+cursor, the history, the search and its matches, the highlighter and its
+per-line state. Two documents share nothing that
 could disagree — which is the point. The undo steps of one hold character indices
 into *its* text; the search of one holds match offsets for *its* text; the
 highlighter of one holds per-line syntax state for *its* lines. Mixing them is
@@ -39,12 +42,12 @@ editor; every other one keeps its state in its slot in `documents`. Switching
 saves the live fields into the current slot and loads the new one out:
 
 ```rust
-pub fn switch_to(&mut self, index: usize) -> bool {
-    if index >= self.documents.len() || index == self.current {
+pub fn show_document(&mut self, index: usize) -> bool {
+    if index >= self.documents.len() || index == self.current_document() {
         return false;
     }
     self.save_document();  // the live fields into the slot they came from
-    self.current = index;
+    self.windows[self.current_window].document = index;  // the window shows it now
     self.load_document();  // that slot's state into the live fields
     true
 }
@@ -67,16 +70,16 @@ commands: they were already reading `self.cursor`, and it was already the right
 one.
 
 A viewport holds two things that do not belong together: where the window is
-scrolled to, which is the document's, and how big the window is, which is the
-window's. Only the scroll is saved and loaded. Swapping the whole viewport would
-mean a save-and-load pair *reads the size out of a placeholder* — and the
-window would quietly become 80 by 24 on every switch.
+scrolled to, which is the window's, and how big the window is, which is the
+screen's. Only the scroll is saved and loaded with the window. Swapping the whole
+viewport would mean a save-and-load pair *reads the size out of a placeholder* —
+and the window would quietly become 80 by 24 on every switch.
 
 ## The commands
 
 | Command | What it does |
 | --- | --- |
-| `:e file` | the file becomes a document of its own and is shown. The one that was open keeps its place in the list — and, if there is a file already open with that name, this refills *that* document instead |
+| `:e file` | the file becomes a document of its own and is shown. The one that was open keeps its place in the list — and a name that is already the one on screen refills *that* document rather than duplicating it |
 | `:e` | refill the current document from disk |
 | `:e!` | the same, without complaining about unsaved changes |
 | `:ls` | one line naming every document, numbered, `%a` on the one on screen |
@@ -96,7 +99,6 @@ alternative is the one thing an editor must never do quietly.
 
 ## What is not here
 
-Splits and tabs: a window is a view of a document, and there is one window.
-`:b#` (the alternate), `:bufdo`, marks per document, and the `'hidden'` option
-that lets `:e` leave a document behind without complaint. A document is also never *unloaded*
+`:b#` (the alternate), `:bufdo`, and the `'hidden'` option that lets `:e` leave
+a document behind without complaint. A document is also never *unloaded*
 — nothing frees a buffer whose text is not needed.

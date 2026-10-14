@@ -32,7 +32,7 @@ frontend only supplies a window or a terminal and a set of keys.
 ## The wire
 
 Frames are `u32` big-endian length + MessagePack payload, capped at 64 MiB
-(`inkstone_rpc::MAX_FRAME_LEN`). Milestone 1 is notification-only: no request ids,
+(`inkstone_rpc::MAX_FRAME_LEN`). The protocol is notification-only: no request ids,
 no replies. A clean EOF (zero bytes of a header) means the peer is gone.
 
 The payload is MessagePack's *compact* form, and a colour travels as one integer
@@ -276,27 +276,48 @@ and ignored — a config typo must not stop the editor from opening.
 | text | when |
 | --- | --- |
 | `E32: No file name` | writing a buffer that has no path |
-| `E37: No write since last change (add ! to override)` | `:q` or `:e` with unsaved changes |
+| `E13: File exists (add ! to override): X` | a `:w` where the file on disk is not the one this buffer read: a name that is already there, or a file somebody else has written since |
+| `E37: No write since last change (add ! to override)` | `:q` (including the `:q` that closes one window), `:e` or `:bd` with unsaved changes |
+| `E21: Cannot make changes, 'readonly' option is set` | an edit while a list window is up — a `:copen` list, `:set all`, `q:`, `q/`: a list is not for editing |
 | `E492: Not a command: X` | unknown name on the `:` line, or from `ed.run` |
 | `E5108: command nesting too deep` | runaway Lua command recursion |
 | `unmapped key: X` | normal-mode key with no binding |
 | `X is not a motion` | a key followed `d`, `y` or `c` that takes no range |
+| `E354: Invalid register name: X` | a `"` followed by something that is not a register |
 | `E486: Pattern not found: X` | a search, or `n`, with no match left to find |
 | `E35: No previous search pattern` | `/` or `n` before anything was searched for |
-| `E54: …` | a pattern that does not compile; the engine's own explanation follows |
+| `E54: …` | a pattern that does not compile, or that asks for `\zs`/`\ze`; the engine's own explanation follows |
 | `E348: No string under cursor` | `*` or `#` with no word under the cursor |
 | `E85: There is no other buffer` | `:bn` or `:bp` with one document open |
 | `E85: There is no other window` | a `<C-w>` key with one window |
+| `E85: There is no line to join` | `J` on the last line of the file |
 | `E16: Invalid range` | `<C-w>h` `j` `k` `l` with no window that way |
+| `E36: Not enough room` | a resize with nothing to take from the other window |
 | `E94: No matching buffer for X` | `:b` with a name nothing is called |
-| `E471: Argument required` | `:s` with nothing after it |
-| `E488: Trailing characters: X` | a `:s` flag that is not `g` or `i` |
+| `E484: No file name under the cursor` / `E484: Can't open file X` | `gf` with no name under the cursor, or on a name that is not there |
+| `E471: Argument required` | a command that needs one — `:s`, `:b`, `:delmarks`, `:set_diagnostics` — with nothing after it |
+| `E474: Invalid argument: X` | an argument a command cannot read: a `:delmarks` letter, a `:sort` flag, a `:set` outside its spellings, an `:mkview` with no file name |
+| `E475: Invalid argument: X` / `E475: Invalid diagnostic: X` | `:resize` with something that is not a number / a `set_diagnostics` entry that does not parse |
+| `E488: Trailing characters: X` | a `:s` flag that is not `g` or `i`, or a delimiter that is not one |
+| `E518: Unknown option: X` | `:set` with a name no setting has |
+| `E33: No previous substitute regular expression` | `:&` or `:&&` before any `:s` |
+| `E490: No fold found` | `zx` with `'foldmethod'` not set to `indent` |
+| `E748: No previous macro` / `E748: No such macro: X` | `@@` before any `@a` / `@a` naming a register nothing was recorded into |
+| `E776: No command history` / `E776: No search history` | `q:` or `q/` with nothing in it |
+| `E776: No location list` / `E553: No more items` | `:colder` or `:cnewer` with no list yet / past either end of them |
+| `E784: Cannot close last tab page` | `:tabclose` with one tab |
+| `E20: Mark not set: X` | a jump to a place nothing was set or left: a mark, `''`, or `<C-o>`/`<C-i>` at either end of the jump list |
+| `E20: No previous visual selection` / `E20: No previous insert position` | `gv` / `gi` with nothing to go back to |
+| `E20: no older change` / `E20: no newer change` | `g;` / `g,` at either end of the change list |
 | `N substitutions on M lines` | a `:s` that worked, and how much it changed |
 | nothing at all | a copy with an empty register: there is nothing to send |
 | `Already at oldest change` | `u` with nothing left to undo |
 | `Already at newest change` | `<C-r>` with nothing to redo |
 | `init.lua: ...` | the config failed to load |
 | `"path" written` / `"name"` | a successful write / a freshly opened file |
+
+Every `E` code the kernel can show is here, along with the messages a person
+sees that carry no code at all.
 
 A message survives until the next key pressed *outside* command mode, so the
 key that runs a `:` command does not erase what it just reported.
@@ -330,10 +351,11 @@ compiler-enforced.
 
 ## Adding things
 
-- **A new command**: write the function in `command.rs`, register it in
-  `CommandRegistry::with_builtins`, bind it in `Keymap::with_defaults` if it
-  deserves a default key, and add a row to the README's keymap table (a test
-  compares that table to the built-in keymap).
+- **A new command**: write `fn name(editor: &mut Editor, params: &[Param])` in
+  `command.rs` and add `name` to the `commands!` list. The name is not repeated
+  anywhere, so it cannot be registered under the wrong one. Bind it in
+  `Keymap::with_defaults` if it deserves a default key, and add a row to the
+  README's keymap table (a test compares that table to the built-in keymap).
 - **A new motion**: implement the movement on `Cursor` (pure, buffer in,
   position out), then a command that calls it and ends with `after_edit()`,
   which re-clamps the cursor, scrolls it into view and marks the screen dirty.
@@ -347,9 +369,6 @@ compiler-enforced.
 - **A new cell attribute**: add one line to `cell_attributes!`, then teach
   `render.rs` to emit it and the frontend to translate it — the attribute test
   fails until both do.
-- **A new command**: write `fn name(editor: &mut Editor, params: &[Param])` in
-  `command.rs` and add `name` to the `commands!` list. The name is not repeated
-  anywhere, so it cannot be registered under the wrong one.
 - **A new message**: add it to `ClientMsg`/`ServerMsg`, handle it in
   `Session::handle`. Frontends are free to ignore anything they do not know.
 - **A new frontend**: use [`inkstone-client`](crates/inkstone-client) to start the

@@ -21,12 +21,11 @@ line + state ──▶ highlights::tokens ──▶ spans ──▶ render::comp
 
 ## A tokenizer, not a parser
 
-The tokenizer knows five kinds of thing — comments, strings, numbers, keywords
-and functions — and it knows them by looking at the characters. That is not a
-parser and it does not pretend to be: it cannot tell a macro body from code, a
-lifetime from a character, or a nested `/* /* */ */` from a mistake, and it
-matters not at all for colouring, because colouring only has to be *locally*
-convincing.
+The tokenizer knows six kinds of thing — comments, strings, numbers, keywords,
+functions and constants — and it knows them by looking at the characters. That
+is not a parser and it does not pretend to be: it cannot tell a macro body from
+code, and it matters not at all for colouring, because colouring only has to be
+*locally* convincing.
 
 What it must get right is the state that crosses a line:
 
@@ -38,9 +37,10 @@ What it must get right is the state that crosses a line:
   end of the line and nothing after it, because that is what a person reading
   the screen wants to see.
 
-Languages for now: **Rust**, and a shared "curly" tokenizer for the C family
-(C, C++, Java, JavaScript, TypeScript, Go), plus **plain** for everything else —
-a file this editor cannot colour is coloured as itself.
+Languages for now: **Rust**, a shared "curly" tokenizer for the C family
+(C, C++, Java, JavaScript, TypeScript, Go), **Python**, **shell**, **config**
+(TOML, YAML, INI), **JSON**, **Markdown** and **HTML**, plus **plain** for
+everything else — a file this editor cannot colour is coloured as itself.
 
 ## Where the state comes from
 
@@ -79,24 +79,23 @@ contract. A tree-sitter highlighter would keep a parse tree per buffer instead o
 a state per line and would answer the same question with the same shape of
 answer; the renderer, the palette and both frontends would not know.
 
-What is deliberately not here: incremental parsing, injection (HTML's `<script>`,
-Markdown's fences), semantic highlighting (what a *type* is, as opposed to what a
-word looks like), and a real parser per file.
+What is deliberately not here: incremental parsing, semantic highlighting (what
+a *type* is, as opposed to what a word looks like), and a real parser per file.
 
 ## The languages now
 
-Five tokenizers, told apart by what their grammars need: Rust (nested comments,
+Eight tokenizers, told apart by what their grammars need: Rust (nested comments,
 raw strings, lifetimes), the C family (one keyword list for C, C++, Java,
 JavaScript, TypeScript, Go and their relatives), Python (`#` comments, three
 quotes, triple-quoted strings that span lines), a shell (`#` comments, its own
 keywords), and a configuration file (TOML, YAML, INI: `#` comments and no
-keywords). JSON is a fifth: strings and numbers and *no* comments, which is the
+keywords). JSON is a sixth: strings and numbers and *no* comments, which is the
 whole of its difference from the C family and the reason it is not simply that.
 
-HTML is a third kind: tags, what is quoted inside them, `<!-- -->` comments, and
-a `<script>` or `<style>` whose body is *another language* — the only place in
-this file where one language holds another. The inner language is scanned by the
-same scanner as anywhere else, with the same rules: a block comment inside a
+HTML is different again: tags, what is quoted inside them, `<!-- -->` comments,
+and a `<script>` or `<style>` whose body is *another language*. The inner
+language is scanned by the same scanner as anywhere else, with the same rules:
+a block comment inside a
 `<script>` runs over lines exactly as it would in a `.js` file. What the outer
 state carries is three fields rather than a `State` of its own — which language is
 running, and what it has open — because a state is `Copy` and a state inside a
@@ -106,8 +105,10 @@ is in, which is why a `</script>` inside a JavaScript string has to be written
 Two things cross a line and both are states of the shape this file already has —
 a comment runs until `-->`, and a tag runs until `>`, so `<a href="one` at the end
 of a line makes the next line's `two">text` the rest of the value rather than
-text. What is deliberately *not* here is a language inside a language: the body of
-a `<script>` is plain, where vim would colour it as JavaScript.
+text. What is deliberately *not* here is a language found anywhere but where the
+markup names it: a `<script>` begins one only when its tag name is read as a tag,
+so a `<script>` written inside a string is a string, and nothing inside the inner
+language opens a further one.
 
 A Markdown fence that says what it holds — ` ```rust `, ` ```py `, ` ```json ` —
 has its body coloured as that language, which is the same trick as a `<script>`:
@@ -128,7 +129,7 @@ A grammar says which of the differences it has — `line_comment`, `python`,
 `nested_comments`, `rust` — and the scanner reads those flags. A new language of
 one of those shapes is a keyword list and an extension, not a scanner.
 
-Markdown is the one that needed a scanner of its own, and the reason is worth
+Markdown needed a scanner of its own, and the reason is worth
 writing down: it has no keywords and no string literals at all, and what it has
 instead is *structure* — a heading is a whole line, a quotation is a `>` at the
 front and emphasis is a pair of markers around a stretch. Almost all of that is

@@ -8,6 +8,37 @@ is that a new feature has to respect these, not rediscover them.
 > what CI cannot check) and [`docs/roadmap.md`](docs/roadmap.md) (what is next,
 > and the constraints it inherits from here).
 
+## Where the code lives
+
+The shape of a module is not an accident, and the two rules that decided it are
+worth keeping:
+
+- **The interface is what another crate can see.** `inkstone-core` re-exports
+  the names the daemon and the frontends use and nothing else; everything else is
+  `pub(crate)`, which is what makes an internal rearrangement stop being a
+  breaking change. `Editor` has around a dozen fields a frontend reads and a few
+  dozen methods it calls; the other five hundred items belong to the crate.
+- **A file is not a module, and a big type may be several files.** Rust lets
+  `impl` blocks for one type live in any file of the crate, so a concern per file
+  costs nothing at run time and nothing in the API.
+
+| Where | What |
+|---|---|
+| `inkstone-core/src/editor/mod.rs` | the `Editor`, its state, its windows and lists, the constructor |
+| `inkstone-core/src/editor/keys.rs` | normal, visual and operator-pending keys |
+| `inkstone-core/src/editor/insert.rs` | insert mode |
+| `inkstone-core/src/editor/edits.rs` | `replace_range`, registers, undo, indent, case, joins |
+| `inkstone-core/src/editor/ex.rs` | the `:` line: parsing, the command table, `:g`, `:s` |
+| `inkstone-core/src/editor/prompt.rs` | the command line and the search preview |
+| `inkstone-core/src/editor/folds.rs` | folds, views, indent folding |
+| `inkstone-core/src/editor/pointer.rs` | the mouse, clicks, separators, scrolling |
+| `inkstone-core/src/editor/lists.rs` | the places/history/settings/diagnostics lists |
+| `inkstone-core/src/editor/lsp.rs` | completion, snippets, diagnostics, the questions asked |
+| `inkstone-core/src/editor/windows.rs` | windows, tabs, documents, the status line |
+| `inkstone-core/src/editor/visual.rs` | what a selection covers |
+| `inkstone-core/src/editor/tests/` | the kernel's tests, one file per topic |
+| `inkstone-server/src/lib.rs` | one `ClientMsg` in, one `ServerMsg` out; the LSP child process |
+
 ## Processes and threads
 
 `inkstone` (frontend) spawns `inkstone-server` (daemon) as a child and talks to it over

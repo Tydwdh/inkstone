@@ -25,6 +25,18 @@
   not to the sentence both share, so both now read `E54: \zs is not supported: a
   match here is a stretch of text and cannot be cut in half`.
 
+### Changed
+- The kernel's internals were reorganized for legibility, with no change in
+  behaviour. `editor.rs` (14,705 lines: one 6,157-line `impl` block and half its
+  length in tests) is now `editor/`, a file per concern, with `editor/tests/` one
+  file per topic; `inkstone-core`'s public interface went from 575 `pub`
+  declarations to 268, the rest `pub(crate)`; `execute_cmdline` went from 380
+  lines of if-blocks to 104 and eight named handlers plus a command table; and
+  the daemon's `pump_lsp`/`ask_lsp` went from 180/104 lines to 5/65 with the
+  answers and requests named. The narrowing also deleted five pieces of dead
+  code that `pub` had been hiding, and marked five test-only methods
+  `#[cfg(test)]`.
+
 ### Added
 - Double, triple and quadruple clicks select what the manual says they do: a word
   under the pointer (or, on a bracket, everything up to its pair), a line, and a

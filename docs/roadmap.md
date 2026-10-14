@@ -2671,6 +2671,39 @@ Extra clicks extend the selection, the way the manual spells out.
   protocol today), and a double click in a help window jumping to the tag, which
   this editor has no tags for.
 
+## Done — the legibility pass
+
+Not a feature: the code was reorganized so that it can keep growing, following
+"A Philosophy of Software Design".
+
+- **What the numbers said:** the functions were never the problem — 21 lines on
+  average in the kernel, 10.8 in `command.rs`, only three over 100 in the whole
+  kernel. The *module* was: `editor.rs` was 14,705 lines holding one 6,157-line
+  `impl Editor` with 227 methods and 7,306 lines of tests, and 575 of the crate's
+  items were `pub` while the world outside used about forty of them.
+- **What shipped:** `editor/` is a directory with a file per concern
+  (`keys`, `insert`, `edits`, `ex`, `prompt`, `folds`, `pointer`, `lists`, `lsp`,
+  `windows`, `visual`, `options`, `documents`, `confirm`, `view`) and
+  `editor/tests/` has one file per topic; the crate's interface is 268 `pub`
+  items with 335 `pub(crate)` behind them; `execute_cmdline` is 104 lines plus
+  eight handlers and a `command_name` table; the daemon's LSP driving is
+  `pump_lsp` in five lines over six named steps.
+- **Constraints it had to respect, and how:** `impl` blocks may live in any file
+  of the crate, so a split is *moving*, not rewriting — and the compiler then
+  finds every item that was public only because it shared a file with its
+  callers. Nothing about behaviour changed: the same 550 tests, fmt, clippy and
+  the doc build are the proof, and each stage was one commit.
+- **What the narrowing found, which is the reason to do it:** five pieces of dead
+  code that `pub` had been hiding (`Search::regex`, `Search::ignore_case`,
+  `LineStates::language`, `Editor::diagnostic_here`, `ListSnapshot::targets`),
+  and five methods nothing but a test calls — now `#[cfg(test)]`, which says so.
+- **Two traps, written down so they are not hit twice:** `cargo clippy` caches,
+  so a "never used" warning can be stale — it named `Editor::visible_lines`,
+  which a test calls, and the method went back in when the test suite disagreed.
+  And a handler that is asked to handle a command has to say *"not mine"* as well
+  as *"done"*: `ex_delete_range` first claimed every `:d`, which silently broke
+  `:g/TODO/d` until two tests caught it.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

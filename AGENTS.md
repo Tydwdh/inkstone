@@ -80,13 +80,20 @@ relative paths — the shell in pty mode is not the one that runs your `cd`.
 | `inkstone-gui` | the windowed frontend: the same grid on the GPU | key translation, cell metrics, palette |
 
 Read in this order to understand it: `inkstone-core/src/lib.rs` (module map) →
-`editor.rs::handle_key` (the mode state machine, the one entry point) →
-`render.rs::compose` (how a screen is made) → `inkstone-rpc/src/lib.rs` (what
-crosses the boundary) → `inkstone-server/src/lib.rs::Session::handle` (and
+`editor/mod.rs` (the `Editor` and its state) → `editor/keys.rs::handle_key`
+(the mode state machine, the one entry point) → `render.rs::compose` (how a
+screen is made) → `inkstone-rpc/src/lib.rs` (what crosses the boundary) →
+`inkstone-server/src/lib.rs::Session::handle` (and
 `crates/inkstone-client/src/lib.rs` for how a frontend talks to it).
 
-## Rules that are enforced, not just written down
+The kernel is one type in a directory: `editor/` has a file per concern
+(`keys`, `insert`, `edits`, `ex`, `prompt`, `folds`, `pointer`, `lists`, `lsp`,
+`windows`, `visual`, `options`, `documents`) and `editor/tests/` has one file per
+topic for the tests. `ARCHITECTURE.md` has the table. A method that only its
+siblings call is `pub(super)`; one a sibling *module of the crate* calls is
+`pub(crate)`; only what the daemon or a frontend uses is `pub`.
 
+## Rules that are enforced, not just written down
 - **Every public item is documented.** `#![warn(missing_docs)]` is on in all
   three libraries and CI runs clippy with `-D warnings`.
 - **Doc links must resolve.** `cargo doc` runs with `-D warnings`.
@@ -130,3 +137,8 @@ crosses the boundary) → `inkstone-server/src/lib.rs::Session::handle` (and
   `ENABLE_VIRTUAL_TERMINAL_PROCESSING`). Raw mode fails under a redirected pipe.
 - The frontend finds its daemon as a sibling executable, or via
   `inkstone --server <PATH>`.
+- **`cargo clippy` caches, and its dead-code analysis is per target.** A "never
+  used" warning can be stale (it once named a method a test calls) and it counts
+  the library build, so a method only tests use is always reported. Before
+  deleting anything on that warning: grep the tests. If only tests use it, that
+  is what `#[cfg(test)]` is for.

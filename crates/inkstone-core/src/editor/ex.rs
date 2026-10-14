@@ -10,6 +10,72 @@ use crate::substitute::{Address, Substitute};
 
 use super::*;
 
+/// The built-in command a `:` name runs, or `None` when there is no such
+/// name. A table rather than code: the names are data, and the one arm that
+/// is not (`:set`, which has its own spelling rules) is handled before this.
+fn command_name(cmd: &str) -> Option<&'static str> {
+    Some(match cmd {
+        "d" | "delete" => "delete_line",
+        "marks" => "list_marks",
+        "delmarks" => "delete_marks",
+        "delmarks!" => "delete_all_marks",
+        "jumps" => "list_jumps",
+        "changes" => "list_changes",
+        "symbols" => "list_symbols",
+        "signature" => "signature_help",
+        "cnext" | "cn" => "place_next",
+        "cprev" | "cp" => "place_previous",
+        "clist" => "place_list",
+        "copen" => "open_places",
+        "cclose" => "close_places",
+        "colder" => "list_older",
+        "cnewer" => "list_newer",
+        "format" | "fmt" => "format_document",
+        "wsymbols" | "ws" => "workspace_symbols",
+        "lopen" => "open_diagnostics",
+        "lclose" => "close_diagnostics",
+        "clearjumps" => "clear_jumps",
+        "p" | "print" => "print_line",
+        "w" => "save",
+        "w!" => "save_force",
+        "q" => "quit",
+        "wq" | "x" => "save_quit",
+        "q!" => "quit_force",
+        "e" => "edit_file",
+        "e!" => "edit_file_force",
+        "ls" | "buffers" | "files" => "list_buffers",
+        "b" | "buffer" => "buffer_go",
+        "bn" | "bnext" => "buffer_next",
+        "bp" | "bprevious" => "buffer_previous",
+        "bd" | "bdelete" => "buffer_delete",
+        "bn!" | "bnext!" => "buffer_next_force",
+        "bp!" | "bprevious!" => "buffer_previous_force",
+        "bd!" | "bdelete!" => "buffer_delete_force",
+        "sp" | "split" => "split_rows",
+        "vs" | "vsplit" => "split_columns",
+        "on" | "only" => "window_only",
+        "reg" | "registers" => "list_registers",
+        "diagnostics" | "diags" => "list_diagnostics",
+        "setdiag" => "set_diagnostics",
+        // `set {name}={value}`, and `set {name}?` to ask. The options layer
+        // already knows every name and every kind of value; this is the
+        // shortest way to reach it from the `:` line.
+        "mkview" => "make_view",
+        "loadview" => "load_view",
+        "tabnew" | "tabedit" => "tab_new",
+        "tabclose" | "tabc" => "tab_close",
+        "tabnext" | "tabn" => "tab_next",
+        "tabprevious" | "tabp" => "tab_previous",
+        "tabs" => "list_tabs",
+        "resize" | "res" => "resize",
+        "vresize" => "resize_vertical",
+        "tabsplit" => "tab_split",
+        "&" => "substitute_again",
+        "&&" => "substitute_again_flags",
+        _ => return None,
+    })
+}
+
 impl Editor {
     /// Rewrap lines to `textwidth`, as one edit.
     ///
@@ -438,305 +504,29 @@ impl Editor {
         } else {
             vec![Param::Str(arg.to_string())]
         };
-        // `:{range}write >> {file}`: part of the buffer, added to a file.
-        if matches!(cmd, "w" | "write") && arg.trim_start().starts_with(">>") {
-            let rest = arg.trim_start().trim_start_matches(">>").trim();
-            let Some(path) = rest.split_whitespace().next().map(PathBuf::from) else {
-                self.message = "E471: Argument required".to_string();
-                return;
-            };
-            let last = self.buffer.line_count().saturating_sub(1);
-            let (from, to) = range.unwrap_or((0, last));
-            match self.append_range(from, to, &path) {
-                Ok(count) => {
-                    self.message = format!(
-                        "{count} line{} appended to \"{}\"",
-                        if count == 1 { "" } else { "s" },
-                        path.display()
-                    );
-                }
-                Err(error) => self.message = error.to_string(),
-            }
+        // Commands that act on a range, or on the line exactly as typed, have a
+        // handler of their own; the rest are a name and a parameter, and go
+        // through the table below.
+        if self.ex_write_append(cmd, arg, range)
+            || self.ex_write_range(cmd, arg, range)
+            || self.ex_read(cmd, arg, range)
+            || self.ex_normal(cmd, line, range)
+            || self.ex_format_range(cmd, range)
+            || self.ex_sort(cmd, arg, range)
+            || self.ex_delete_range(cmd, range)
+        {
             return;
         }
-        // `:{range}write {file}`: part of the buffer, to a file.
-        if matches!(cmd, "w" | "write") && range.is_some() {
-            let Some(path) = arg.split_whitespace().next().map(PathBuf::from) else {
-                self.message = "E471: Argument required".to_string();
-                return;
-            };
-            let last = self.buffer.line_count().saturating_sub(1);
-            let (from, to) = range.unwrap_or((0, last));
-            match self.write_range(from, to, &path) {
-                Ok(count) => {
-                    self.message = format!(
-                        "{count} line{} written to \"{}\"",
-                        if count == 1 { "" } else { "s" },
-                        path.display()
-                    );
-                }
-                Err(error) => self.message = error.to_string(),
-            }
+        // `:set` has spellings of its own — `nonumber`, `number?`, `all`,
+        // `inv{name}` — so it is handled before the table of names.
+        if cmd == "set" {
+            self.ex_set(arg);
             return;
         }
-        // `:read {file}`: the file's lines, below the one the cursor is on — or
-        // below the range's last line, when the line named one.
-        if matches!(cmd, "r" | "read") {
-            let Some(path) = arg.split_whitespace().next().map(PathBuf::from) else {
-                self.message = "E471: Argument required".to_string();
-                return;
-            };
-            if let Some((_, to)) = range {
-                let last = self.buffer.line_count().saturating_sub(1);
-                self.cursor.row = to.min(last);
-            }
-            match self.read_file_below(&path) {
-                Ok(count) => {
-                    self.message = format!(
-                        "{count} line{} read from \"{}\"",
-                        if count == 1 { "" } else { "s" },
-                        path.display()
-                    );
-                }
-                Err(error) => self.message = error.to_string(),
-            }
+
+        let Some(name) = command_name(cmd) else {
+            self.message = format!("E492: Not a command: {cmd}");
             return;
-        }
-        // `:normal {keys}`: the keys as if typed, once per line of the range.
-        //
-        // The keys are what is left of the line *verbatim* — a space in them is
-        // a key, not a separator — and they are read with the same notation
-        // everything else uses, so `<Esc>` in them is the Escape key rather than
-        // five characters. A run that is still inserting when its keys end is
-        // put back into normal mode, which is what makes the old idiom
-        // `:%normal A;` append to every line rather than to the first.
-        if cmd == "normal" || cmd == "norm" {
-            let Some(keys) = line.split_once(char::is_whitespace).map(|(_, keys)| keys) else {
-                self.message = "E471: Argument required".to_string();
-                return;
-            };
-            let last = self.buffer.line_count().saturating_sub(1);
-            let (from, to) =
-                range.unwrap_or((self.cursor.row.min(last), self.cursor.row.min(last)));
-            let count = to.saturating_sub(from) + 1;
-            for row in from..=to {
-                if row > self.buffer.line_count().saturating_sub(1) {
-                    break;
-                }
-                let at = self.buffer.line_col_to_char(row, 0);
-                self.cursor.set_char_idx(&self.buffer, at);
-                for key in crate::keymap::parse_normal_keys(keys) {
-                    self.handle_key(key);
-                }
-                if self.mode == Mode::Insert {
-                    self.run_command("escape", &[]);
-                }
-            }
-            self.message = format!(
-                "{count} line{} normalised",
-                if count == 1 { "" } else { "s" }
-            );
-            return;
-        }
-        // `:{range}format` is the server's formatting, for the lines a range
-        // names; `:format` with no range is the whole file.
-        if matches!(cmd, "format" | "fmt") && range.is_some() {
-            let last = self.buffer.line_count().saturating_sub(1);
-            let (from, to) = range.unwrap_or((0, last));
-            self.run_command(
-                "format_range_command",
-                &[Param::Int(from as i64), Param::Int(to as i64)],
-            );
-            return;
-        }
-        // `:sort` and its flags: the whole file when no range was named, and one
-        // edit however many lines it moves.
-        if let Some(flags) = cmd.strip_prefix("sort") {
-            let last = self.buffer.line_count().saturating_sub(1);
-            // The range was read before the line was stripped of it.
-            let (from, to) = range.unwrap_or((0, last));
-            let mut spec = SortSpec::default();
-            // `:sort!` has no space between the name and the flag, and
-            // `:sort n` has one: they are the same list either way.
-            let flags = format!("{flags}{}", arg.trim());
-            for flag in flags.chars() {
-                match flag {
-                    '!' => spec.reverse = true,
-                    'n' => spec.numeric = true,
-                    'i' => spec.ignore_case = true,
-                    'u' => spec.unique = true,
-                    other => {
-                        self.message = format!("E474: Invalid argument: {other}");
-                        return;
-                    }
-                }
-            }
-            let count = self.sort_lines(from, to, &spec);
-            self.message = format!("{count} line{} sorted", if count == 1 { "" } else { "s" });
-            return;
-        }
-        // A delete with a range is that many lines rather than the cursor's one.
-        if matches!(cmd, "d" | "delete") {
-            if let Some((from, to)) = range {
-                let start = self.buffer.line_col_to_char(from, 0);
-                let end = self.buffer.line_col_to_char(to, 0)
-                    + self.buffer.line_len(to)
-                    + self.buffer.line_terminator_len(to);
-                self.cut(start, end, Kind::Linewise, Some(start));
-                return;
-            }
-        }
-        let name = match cmd {
-            "d" | "delete" => "delete_line",
-            "marks" => "list_marks",
-            "delmarks" => "delete_marks",
-            "delmarks!" => "delete_all_marks",
-            "jumps" => "list_jumps",
-            "changes" => "list_changes",
-            "symbols" => "list_symbols",
-            "signature" => "signature_help",
-            "cnext" | "cn" => "place_next",
-            "cprev" | "cp" => "place_previous",
-            "clist" => "place_list",
-            "copen" => "open_places",
-            "cclose" => "close_places",
-            "colder" => "list_older",
-            "cnewer" => "list_newer",
-            "format" | "fmt" => "format_document",
-            "wsymbols" | "ws" => "workspace_symbols",
-            "lopen" => "open_diagnostics",
-            "lclose" => "close_diagnostics",
-            "clearjumps" => "clear_jumps",
-            "p" | "print" => "print_line",
-            "w" => "save",
-            "w!" => "save_force",
-            "q" => "quit",
-            "wq" | "x" => "save_quit",
-            "q!" => "quit_force",
-            "e" => "edit_file",
-            "e!" => "edit_file_force",
-            "ls" | "buffers" | "files" => "list_buffers",
-            "b" | "buffer" => "buffer_go",
-            "bn" | "bnext" => "buffer_next",
-            "bp" | "bprevious" => "buffer_previous",
-            "bd" | "bdelete" => "buffer_delete",
-            "bn!" | "bnext!" => "buffer_next_force",
-            "bp!" | "bprevious!" => "buffer_previous_force",
-            "bd!" | "bdelete!" => "buffer_delete_force",
-            "sp" | "split" => "split_rows",
-            "vs" | "vsplit" => "split_columns",
-            "on" | "only" => "window_only",
-            "reg" | "registers" => "list_registers",
-            "diagnostics" | "diags" => "list_diagnostics",
-            "setdiag" => "set_diagnostics",
-            // `set {name}={value}`, and `set {name}?` to ask. The options layer
-            // already knows every name and every kind of value; this is the
-            // shortest way to reach it from the `:` line.
-            "set" => {
-                let (name, value) = match arg.split_once('=') {
-                    Some((name, value)) => (name.trim().to_string(), value.trim().to_string()),
-                    None => (arg.trim().to_string(), String::new()),
-                };
-                // `:set all` is every setting in a window of its own, and
-                // `:set inv{name}` turns a switch the other way — vim's two ways of
-                // looking at the whole set and of flipping one of it.
-                if name == "all" && value.is_empty() {
-                    self.open_settings_window();
-                    return;
-                }
-                if value.is_empty() {
-                    if let Some(rest) = name.strip_prefix("inv") {
-                        match crate::settings::Setting::from_name(rest) {
-                            None => {
-                                self.message = format!("E518: Unknown option: {rest}");
-                            }
-                            Some(setting) => {
-                                let flipped = match self.options.borrow().get(setting) {
-                                    Param::Bool(value) => (!value).to_string(),
-                                    _ => {
-                                        self.message = format!("E474: {rest} is not a switch");
-                                        return;
-                                    }
-                                };
-                                match self.set_option(setting, &flipped) {
-                                    Ok(()) => self.message = format!("{rest}={flipped}"),
-                                    Err(error) => {
-                                        self.message = format!("E474: {rest} {error}");
-                                    }
-                                }
-                            }
-                        }
-                        return;
-                    }
-                }
-                // The three spellings vim has, since they are the three anybody
-                // types: `:set number` turns a switch on, `:set nonumber` turns it
-                // off, and `:set number?` asks what it is. A bare name that is not
-                // a switch asks too, there being no "on" for a number.
-                let asked = name.ends_with('?');
-                let (name, value) = match (asked, value.is_empty(), name.strip_prefix("no")) {
-                    (false, true, Some(rest)) => match Setting::from_name(rest) {
-                        Some(setting)
-                            if matches!(self.options.borrow().get(setting), Param::Bool(_)) =>
-                        {
-                            (rest.to_string(), "false".to_string())
-                        }
-                        _ => (name, value),
-                    },
-                    (false, true, None) => match Setting::from_name(&name) {
-                        Some(setting)
-                            if matches!(self.options.borrow().get(setting), Param::Bool(_)) =>
-                        {
-                            (name, "true".to_string())
-                        }
-                        _ => (name, value),
-                    },
-                    _ => (name, value),
-                };
-                let name = name.trim_end_matches('?').to_string();
-                match crate::settings::Setting::from_name(&name) {
-                    None => self.message = format!("E518: Unknown option: {name}"),
-                    Some(setting) if value.is_empty() => {
-                        self.message = format!("{name}={}", self.option_text(setting));
-                    }
-                    Some(setting) => match self.set_option(setting, &value) {
-                        Ok(()) => {
-                            self.message = format!("{name}={value}");
-                            // With `'foldmethod'` set to `indent` the folds are a
-                            // function of the settings — the method itself, the
-                            // characters ignored, how deep they may nest, and what a
-                            // tab counts as — so setting *any* of them works the folds
-                            // out again. A `:set` is not a keystroke, and a promise of
-                            // folds is not folds.
-                            if self.foldmethod_is_indent() {
-                                let count = self.compute_indent_folds();
-                                self.message = format!(
-                                    "{name}={value} ({count} fold{})",
-                                    if count == 1 { "" } else { "s" }
-                                );
-                            }
-                        }
-                        Err(error) => self.message = format!("E474: {name} {error}"),
-                    },
-                }
-                return;
-            }
-            "mkview" => "make_view",
-            "loadview" => "load_view",
-            "tabnew" | "tabedit" => "tab_new",
-            "tabclose" | "tabc" => "tab_close",
-            "tabnext" | "tabn" => "tab_next",
-            "tabprevious" | "tabp" => "tab_previous",
-            "tabs" => "list_tabs",
-            "resize" | "res" => "resize",
-            "vresize" => "resize_vertical",
-            "tabsplit" => "tab_split",
-            "&" => "substitute_again",
-            "&&" => "substitute_again_flags",
-            other => {
-                self.message = format!("E492: Not a command: {other}");
-                return;
-            }
         };
         self.run_command(name, &params);
     }
@@ -803,6 +593,280 @@ impl Editor {
         }
         if self.message.is_empty() {
             self.message = format!("{} lines", rows.len());
+        }
+    }
+
+    // `:{range}write >> {file}`: part of the buffer, added to a file.
+    fn ex_write_append(&mut self, cmd: &str, arg: &str, range: Option<(usize, usize)>) -> bool {
+        if !(matches!(cmd, "w" | "write") && arg.trim_start().starts_with(">>")) {
+            return false;
+        }
+
+        let rest = arg.trim_start().trim_start_matches(">>").trim();
+        let Some(path) = rest.split_whitespace().next().map(PathBuf::from) else {
+            self.message = "E471: Argument required".to_string();
+            return true;
+        };
+        let last = self.buffer.line_count().saturating_sub(1);
+        let (from, to) = range.unwrap_or((0, last));
+        match self.append_range(from, to, &path) {
+            Ok(count) => {
+                self.message = format!(
+                    "{count} line{} appended to \"{}\"",
+                    if count == 1 { "" } else { "s" },
+                    path.display()
+                );
+            }
+            Err(error) => self.message = error.to_string(),
+        }
+        true
+    }
+
+    // `:{range}write {file}`: part of the buffer, to a file.
+    fn ex_write_range(&mut self, cmd: &str, arg: &str, range: Option<(usize, usize)>) -> bool {
+        if !(matches!(cmd, "w" | "write") && range.is_some()) {
+            return false;
+        }
+
+        let Some(path) = arg.split_whitespace().next().map(PathBuf::from) else {
+            self.message = "E471: Argument required".to_string();
+            return true;
+        };
+        let last = self.buffer.line_count().saturating_sub(1);
+        let (from, to) = range.unwrap_or((0, last));
+        match self.write_range(from, to, &path) {
+            Ok(count) => {
+                self.message = format!(
+                    "{count} line{} written to \"{}\"",
+                    if count == 1 { "" } else { "s" },
+                    path.display()
+                );
+            }
+            Err(error) => self.message = error.to_string(),
+        }
+        true
+    }
+
+    // `:read {file}`: the file's lines, below the one the cursor is on — or
+    // below the range's last line, when the line named one.
+    fn ex_read(&mut self, cmd: &str, arg: &str, range: Option<(usize, usize)>) -> bool {
+        if !(matches!(cmd, "r" | "read")) {
+            return false;
+        }
+
+        let Some(path) = arg.split_whitespace().next().map(PathBuf::from) else {
+            self.message = "E471: Argument required".to_string();
+            return true;
+        };
+        if let Some((_, to)) = range {
+            let last = self.buffer.line_count().saturating_sub(1);
+            self.cursor.row = to.min(last);
+        }
+        match self.read_file_below(&path) {
+            Ok(count) => {
+                self.message = format!(
+                    "{count} line{} read from \"{}\"",
+                    if count == 1 { "" } else { "s" },
+                    path.display()
+                );
+            }
+            Err(error) => self.message = error.to_string(),
+        }
+        true
+    }
+
+    // `:normal {keys}`: the keys as if typed, once per line of the range.
+    //
+    // The keys are what is left of the line *verbatim* — a space in them is
+    // a key, not a separator — and they are read with the same notation
+    // everything else uses, so `<Esc>` in them is the Escape key rather than
+    // five characters. A run that is still inserting when its keys end is
+    // put back into normal mode, which is what makes the old idiom
+    // `:%normal A;` append to every line rather than to the first.
+    fn ex_normal(&mut self, cmd: &str, line: &str, range: Option<(usize, usize)>) -> bool {
+        if !(cmd == "normal" || cmd == "norm") {
+            return false;
+        }
+
+        let Some(keys) = line.split_once(char::is_whitespace).map(|(_, keys)| keys) else {
+            self.message = "E471: Argument required".to_string();
+            return true;
+        };
+        let last = self.buffer.line_count().saturating_sub(1);
+        let (from, to) = range.unwrap_or((self.cursor.row.min(last), self.cursor.row.min(last)));
+        let count = to.saturating_sub(from) + 1;
+        for row in from..=to {
+            if row > self.buffer.line_count().saturating_sub(1) {
+                break;
+            }
+            let at = self.buffer.line_col_to_char(row, 0);
+            self.cursor.set_char_idx(&self.buffer, at);
+            for key in crate::keymap::parse_normal_keys(keys) {
+                self.handle_key(key);
+            }
+            if self.mode == Mode::Insert {
+                self.run_command("escape", &[]);
+            }
+        }
+        self.message = format!(
+            "{count} line{} normalised",
+            if count == 1 { "" } else { "s" }
+        );
+        true
+    }
+
+    // `:{range}format` is the server's formatting, for the lines a range
+    // names; `:format` with no range is the whole file.
+    fn ex_format_range(&mut self, cmd: &str, range: Option<(usize, usize)>) -> bool {
+        if !(matches!(cmd, "format" | "fmt") && range.is_some()) {
+            return false;
+        }
+
+        let last = self.buffer.line_count().saturating_sub(1);
+        let (from, to) = range.unwrap_or((0, last));
+        self.run_command(
+            "format_range_command",
+            &[Param::Int(from as i64), Param::Int(to as i64)],
+        );
+        true
+    }
+
+    // `:sort` and its flags: the whole file when no range was named, and one
+    // edit however many lines it moves.
+    // The range was read before the line was stripped of it.
+    // `:sort!` has no space between the name and the flag, and
+    // `:sort n` has one: they are the same list either way.
+    fn ex_sort(&mut self, cmd: &str, arg: &str, range: Option<(usize, usize)>) -> bool {
+        let Some(flags) = cmd.strip_prefix("sort") else {
+            return false;
+        };
+
+        let last = self.buffer.line_count().saturating_sub(1);
+        // The range was read before the line was stripped of it.
+        let (from, to) = range.unwrap_or((0, last));
+        let mut spec = SortSpec::default();
+        // `:sort!` has no space between the name and the flag, and
+        // `:sort n` has one: they are the same list either way.
+        let flags = format!("{flags}{}", arg.trim());
+        for flag in flags.chars() {
+            match flag {
+                '!' => spec.reverse = true,
+                'n' => spec.numeric = true,
+                'i' => spec.ignore_case = true,
+                'u' => spec.unique = true,
+                other => {
+                    self.message = format!("E474: Invalid argument: {other}");
+                    return true;
+                }
+            }
+        }
+        let count = self.sort_lines(from, to, &spec);
+        self.message = format!("{count} line{} sorted", if count == 1 { "" } else { "s" });
+        true
+    }
+
+    /// `:{range}d`: a delete with a range is that many lines rather than the
+    /// cursor's one. Without a range this is not the handler's business — the
+    /// table below runs `delete_line` for a bare `:d`.
+    fn ex_delete_range(&mut self, cmd: &str, range: Option<(usize, usize)>) -> bool {
+        if !(matches!(cmd, "d" | "delete")) {
+            return false;
+        }
+        let Some((from, to)) = range else {
+            return false;
+        };
+        let start = self.buffer.line_col_to_char(from, 0);
+        let end = self.buffer.line_col_to_char(to, 0)
+            + self.buffer.line_len(to)
+            + self.buffer.line_terminator_len(to);
+        self.cut(start, end, Kind::Linewise, Some(start));
+        true
+    }
+
+    /// `:set` and its three spellings: a switch on, a switch off, and a
+    /// question about any setting. `:set all` opens the settings window.
+    fn ex_set(&mut self, arg: &str) {
+        let (name, value) = match arg.split_once('=') {
+            Some((name, value)) => (name.trim().to_string(), value.trim().to_string()),
+            None => (arg.trim().to_string(), String::new()),
+        };
+        // `:set all` is every setting in a window of its own, and
+        // `:set inv{name}` turns a switch the other way — vim's two ways of
+        // looking at the whole set and of flipping one of it.
+        if name == "all" && value.is_empty() {
+            self.open_settings_window();
+            return;
+        }
+        if value.is_empty() {
+            if let Some(rest) = name.strip_prefix("inv") {
+                match crate::settings::Setting::from_name(rest) {
+                    None => {
+                        self.message = format!("E518: Unknown option: {rest}");
+                    }
+                    Some(setting) => {
+                        let flipped = match self.options.borrow().get(setting) {
+                            Param::Bool(value) => (!value).to_string(),
+                            _ => {
+                                self.message = format!("E474: {rest} is not a switch");
+                                return;
+                            }
+                        };
+                        match self.set_option(setting, &flipped) {
+                            Ok(()) => self.message = format!("{rest}={flipped}"),
+                            Err(error) => {
+                                self.message = format!("E474: {rest} {error}");
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+        }
+        // The three spellings vim has, since they are the three anybody
+        // types: `:set number` turns a switch on, `:set nonumber` turns it
+        // off, and `:set number?` asks what it is. A bare name that is not
+        // a switch asks too, there being no "on" for a number.
+        let asked = name.ends_with('?');
+        let (name, value) = match (asked, value.is_empty(), name.strip_prefix("no")) {
+            (false, true, Some(rest)) => match Setting::from_name(rest) {
+                Some(setting) if matches!(self.options.borrow().get(setting), Param::Bool(_)) => {
+                    (rest.to_string(), "false".to_string())
+                }
+                _ => (name, value),
+            },
+            (false, true, None) => match Setting::from_name(&name) {
+                Some(setting) if matches!(self.options.borrow().get(setting), Param::Bool(_)) => {
+                    (name, "true".to_string())
+                }
+                _ => (name, value),
+            },
+            _ => (name, value),
+        };
+        let name = name.trim_end_matches('?').to_string();
+        match crate::settings::Setting::from_name(&name) {
+            None => self.message = format!("E518: Unknown option: {name}"),
+            Some(setting) if value.is_empty() => {
+                self.message = format!("{name}={}", self.option_text(setting));
+            }
+            Some(setting) => match self.set_option(setting, &value) {
+                Ok(()) => {
+                    self.message = format!("{name}={value}");
+                    // With `'foldmethod'` set to `indent` the folds are a
+                    // function of the settings — the method itself, the
+                    // characters ignored, how deep they may nest, and what a
+                    // tab counts as — so setting *any* of them works the folds
+                    // out again. A `:set` is not a keystroke, and a promise of
+                    // folds is not folds.
+                    if self.foldmethod_is_indent() {
+                        let count = self.compute_indent_folds();
+                        self.message = format!(
+                            "{name}={value} ({count} fold{})",
+                            if count == 1 { "" } else { "s" }
+                        );
+                    }
+                }
+                Err(error) => self.message = format!("E474: {name} {error}"),
+            },
         }
     }
 }

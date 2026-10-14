@@ -2,8 +2,9 @@
 
 Orientation for a new contributor — human or agent — picking this up cold.
 [`README.md`](README.md) is for users, [`ARCHITECTURE.md`](ARCHITECTURE.md) is
-the contract, [`docs/roadmap.md`](docs/roadmap.md) is what comes next. This file
-is how to work on it without breaking it.
+the contract, [`docs/roadmap.md`](docs/roadmap.md) is what comes next, and
+[`docs/rendering.md`](docs/rendering.md) is what the wire carries and what a
+second frontend needs. This file is how to work on it without breaking it.
 
 ## The one-paragraph summary
 
@@ -36,10 +37,12 @@ built, because the frontend looks for the daemon next to its own executable —
 
 ## What is not tested, and how to check it
 
-The kernel, the protocol and the daemon are covered by 151 tests, including one
+The kernel, the protocol and the daemon are covered by 467 tests, including one
 that drives the real daemon binary over pipes and inspects the bytes it writes.
-**The frontend's terminal work is not covered by CI and cannot be**: raw mode
-needs a real terminal.
+**A frontend's drawing is not covered by CI and cannot be**: raw mode needs a
+real terminal, and a window needs a real window. Both the window's metrics and
+the terminal frontend's key translation are unit tested; what the pixels or the
+terminal do with them is checked by hand.
 
 So after touching anything visible — rendering, input, the daemon's startup —
 run it in a terminal:
@@ -64,15 +67,19 @@ relative paths — the shell in pty mode is not the one that runs your `cd`.
 
 | crate | what | tests |
 | --- | --- | --- |
-| `inkstone-core` | document, cursor, modes, commands, keymap, screen model, Lua host | unit tests in each module |
-| `inkstone-rpc` | the wire: messages, framing, the screen grid types | framing round trips |
+| `inkstone-lsp` | the language server client: framing, the lifecycle, positions |
+| `inkstone-core` | document, cursor, edit history, register, search, modes (normal, visual, insert, command), commands, keymap, screen model, Lua host | unit tests in each module |
+| `inkstone-rpc` | the wire: messages, framing, the screen grid types, the screen a frontend holds | framing round trips, deltas |
 | `inkstone-server` | the daemon: an `Editor` plus a session loop | `tests/session.rs` (in-process and end-to-end) |
+| `inkstone-client` | spawning the daemon, framing, folding frames — shared by the frontends | path resolution |
 | `inkstone` | the crossterm frontend and launcher | key translation, drawing, terminal checks |
+| `inkstone-gui` | the windowed frontend: the same grid on the GPU | key translation, cell metrics, palette |
 
 Read in this order to understand it: `inkstone-core/src/lib.rs` (module map) →
 `editor.rs::handle_key` (the mode state machine, the one entry point) →
 `render.rs::compose` (how a screen is made) → `inkstone-rpc/src/lib.rs` (what
-crosses the boundary) → `inkstone-server/src/lib.rs::Session::handle`.
+crosses the boundary) → `inkstone-server/src/lib.rs::Session::handle` (and
+`crates/inkstone-client/src/lib.rs` for how a frontend talks to it).
 
 ## Rules that are enforced, not just written down
 
@@ -99,6 +106,9 @@ crosses the boundary) → `inkstone-server/src/lib.rs::Session::handle`.
   terminator), grid cells (empty text means a continuation cell), message
   lifetime, and the Lua callback queue. `ARCHITECTURE.md` states each with the
   reason; read it before changing anything in those areas.
+- **Every edit goes through `Editor::replace_range`.** It is the one place a
+  change is recorded, so a new command that mutates `buffer` directly would
+  compile and then quietly be the one change `u` cannot undo.
 - **Prefer deleting to adding.** Dead API with no caller outside its own test
   goes.
 - **Commits** are conventional (`fix:`, `refactor:`, `docs:`, `chore:`) and

@@ -15,20 +15,38 @@ the child's stdin/stdout. There is exactly one writer to each direction.
 
 | process | thread | owns |
 | --- | --- | --- |
-| `inkstone` | main | the terminal, the draw loop, the child handles |
+| `inkstone` | main | the terminal, the draw loop, the screen cache, the daemon handle |
 | `inkstone` | `inkstone-input-reader` | blocking `event::read()` |
 | `inkstone` | `inkstone-rpc-reader` | reading frames from the daemon |
+| `inkstone-gui` | main | the window, the event loop, the screen cache, the GPU |
+| `inkstone-gui` | `inkstone-rpc-reader` | reading frames from the daemon |
+| `inkstone-gui` | `inkstone-gui-bridge` | waking the event loop for the frames that arrive |
 | `inkstone-server` | main | the `Editor`, the output stream, the Lua VM |
 | `inkstone-server` | `inkstone-server-rpc-reader` | blocking read of client frames |
 
 The editor never crosses a thread boundary, so it needs no locks. The only
-shared state is messages in a `crossbeam-channel`.
+shared state is messages in a `crossbeam-channel`. Starting the daemon, framing
+at it and reading its frames is [`inkstone_client`](crates/inkstone-client), so a
+frontend only supplies a window or a terminal and a set of keys.
 
 ## The wire
 
 Frames are `u32` big-endian length + MessagePack payload, capped at 64 MiB
 (`inkstone_rpc::MAX_FRAME_LEN`). Milestone 1 is notification-only: no request ids,
 no replies. A clean EOF (zero bytes of a header) means the peer is gone.
+
+The payload is MessagePack's *compact* form, and a colour travels as one integer
+rather than as an enum variant: a screen is two thousand tiny structs, and their
+field and variant names are the difference between 63 KiB and 11 KiB per screen.
+[`docs/rendering.md`](docs/rendering.md) has the numbers.
+
+A session sends the whole screen once (`ServerMsg::Redraw`, also after a resize,
+since a delta needs a screen of the same shape to patch) and then only the rows
+that changed (`ServerMsg::Rows`), each as runs of identical cells. A keystroke
+that changes nothing but the cursor carries no rows at all. Deltas are only valid
+against the frame before them, so a frontend must fold every frame it reads —
+that is what [`inkstone_rpc::Screen`] is, and it is the one piece of state a
+frontend keeps.
 
 ```mermaid
 sequenceDiagram
@@ -39,9 +57,9 @@ sequenceDiagram
     D-->>F: Redraw{grid,cursor,cursor_visible}
     F->>D: Input{KeyMsg}
     F->>D: Input{KeyMsg}
-    D-->>F: Redraw{...}
+    D-->>F: Rows{updates,cursor,cursor_visible}
     F->>D: Input{':','q','!',Enter}
-    D-->>F: Redraw{...}
+    D-->>F: Rows{updates:[the message row],...}
     D-->>F: Quit
     F->>D: Shutdown
 ```
@@ -49,7 +67,10 @@ sequenceDiagram
 The daemon emits one frame per client message that could have changed the
 screen (`Editor::redraw`), plus one before it starts reading, so a frontend
 that only reads still sees a screen. `ClientMsg::Input` is a *key*, never a
-character: mode logic lives in the daemon.
+character: mode logic lives in the daemon. `ClientMsg::Pointer` is a *screen
+cell*, never a buffer position, for the same reason: only the daemon knows the
+gutter, the tabstops and the wide graphemes that turn a cell into a place in the
+document.
 
 `Grid`/`Cell`/`Color` are defined once, in `inkstone-rpc`. `inkstone-core` re-exports
 them; it does not define its own.
@@ -60,9 +81,27 @@ A `Grid` is `width * height` cells, row-major, and it is always fully
 populated — empty screen space is a cell containing `" "`. That makes a grid
 self-describing: a frontend writes every cell and never has to clear first.
 
+Every frame also says where the cursor is, whether to show it, and whether the
+editor is inserting text. A windowed frontend needs the last one: an input method
+belongs where text goes, and left on in normal mode it takes the keys that run
+commands. The cursor is a bar while inserting and a block otherwise.
+
+The one piece of state a frontend keeps is `inkstone_rpc::Screen`: the grid the
+daemon has drawn, folded forward from the frames it reads, plus the cursor. It
+is a cache of the *screen* — a frontend still cannot compute a cursor position,
+find a line or run a key.
+
+A cell's colour is the syntax colour where there is one, and its attribute bits
+carry everything that composes on top of it: a search match is underlined, the
+match the cursor is in is bold, a visual selection is reversed. Four things make
+one cell, and they compose rather than replace each other, which is why the row's
+styles resolve in one place (`render::RowHighlight`).
+
 A cell whose `text` is **empty** is a *continuation cell*: the second half of a
 double-width grapheme stored in the cell to its left. Frontends must skip those
-when drawing, or they will blank the right half of every CJK character.
+when drawing, or they will blank the right half of every CJK character. Such a
+cell carries its grapheme's colours and attributes, so a highlight over a wide
+character covers both halves of it.
 
 Row layout is fixed: `height - 2` text rows, then the status line (reverse
 video, edge to edge), then the command/message line.
@@ -96,13 +135,124 @@ cursor on a real character whenever the mode is normal, which is what makes
 `x`, `$` and `l` behave at the end of a line. It runs before dispatching a
 normal-mode key and after every edit.
 
+## Documents and windows
+
+The editor has one or more files open, and one or more windows looking at them.
+A `Document` is a buffer and what follows it through a file — the undo history,
+the search and its matches, the syntax colours and the per-line state they need.
+A `Window` is a *look* at a document: which document, where the cursor is in it,
+and where it is scrolled to. Everything else — the register, the mode, the
+keymap, the options, the command line, the script host — belongs to the session
+and is shared. Design notes: `docs/buffers.md`, `docs/windows.md`.
+
+The window that is up and its document keep their state in the editor's own
+fields; every other one keeps its state in its slot, and switching swaps the two.
+That is why `:bn` and `<C-w>j` need nothing from the rest of the editor: a
+command reading `self.cursor` was already reading the cursor of the window that
+is up, and one reading `self.buffer` the document it shows.
+
+Two seams are worth knowing. The screen's size lives in the viewport but belongs
+to the screen, not to the window that happened to be up when it was resized, so
+only the scroll is saved and loaded. And a window may look at a document that is
+live in the editor's fields, in which case its slot holds a placeholder: the
+renderer reads the text of those windows from the view itself and only their
+positions from the windows.
+
+## The edit history
+
+One step is one *replacement*: `[start, start + removed.len())` held `removed`
+and now holds `inserted`, plus the cursor on either side of it. A step stores
+character indices and owned text — never a rope slice, never a snapshot — so it
+stays valid while later steps are recorded on top of it, and undoing
+newest-first always restores the buffer to the exact state the next step down
+was made in.
+
+Every step's result is a *state* with an identity the history hands out, and the
+last write remembers which state it wrote. That is the whole of "modified": no
+flag on the buffer, no comparing text, and `u` back to the written state clears
+the marker while `u` past it puts the marker back. An edit that restores the same
+text is still an edit — it is a different state.
+
+Three things make that exact:
+
+- **`Buffer::replace_range` is the only mutation.** A step is rebuilt with one
+  replacement, and the trailing-newline invariant is restored once, at the end
+  of it. Two operations would repair the newline in between, and a `dd` on the
+  last line of a file would come back with an extra empty line.
+- **A step that removes the buffer's last terminator owns the newline the
+  invariant hands back** (`Change::planned`). `remove(0, len)` on `"abc\n"`
+  leaves `"\n"`, so the step is "`abc\n` became `\n`" — and undo and redo are
+  exact because the newline is part of it.
+- **A group is what a user thinks a change is.** A group is opened around one
+  command and around an insert session, and *when it closes* the steps inside it
+  are folded into one — which is what makes `ohello<Esc>` a single `u`, even
+  though the line break and the typing are two steps that never chain. While it
+  is open, a step that continues the group's entry (writing where the caret is,
+  backspacing in front of it, deleting a run one key at a time) grows that entry
+  instead. A step also remembers where its caret sits inside what it wrote,
+  since `o` leaves the cursor in front of the line break it inserted rather than
+  after it. Folding gives up rather than guessing when two steps in a group
+  overlap (`docs/undo.md` says what that costs). That is why
+  `Editor::run_command` opens one: `3x` is one command and so one `u`, and
+  `i…<Esc>` is one session and so one `u`.
+
+Nothing about this is on the wire: a frontend sends `u` as a key, or `undo` as
+a command, and gets a redraw of the restored screen back.
+
 ## Modes
 
 | mode | dispatch |
 | --- | --- |
 | normal | keymap → command registry, with a pending buffer for multi-key sequences |
-| insert | insert-mode keymap first, then built-in text entry; mappings are single-key |
+| visual | its own keymap first (the operators), then the normal mode's — so a motion is extended by exactly the command `w` is bound to |
+| insert | insert-mode keymap first — sequences included, with the keys held back until the next one says whether they are a mapping, and typed after all when they are not — then built-in text entry |
 | command | edits a command line, executed on `<Enter>` by `Editor::execute_cmdline` |
+
+A pattern is a Rust regular expression, compiled once and kept, and it is matched
+*within a line* — which is what makes `^` and `$` the line's own ends and a match
+something a row can draw. `:s` replaces with the same compiled pattern, so search
+and substitution cannot disagree about what a pattern means.
+
+`/` and `?` are the same mode as `:`, with a different prompt character, and
+`Prompt` is what tells them apart: the editor hands the renderer the whole line
+(`:w`, `/two`) rather than a mode for it to spell. That line is a `String` and a
+character index — not a `Buffer` — and while it is being typed the terminal
+cursor belongs *in* it, which is also where an input method's window should
+appear.
+
+A visual selection is an anchor and a kind; the cursor is its other end, so it is
+recomputed from the two on every frame instead of being stored as indices that a
+later edit would move. The highlight is the reverse-video attribute bit, which is
+why visual mode needed nothing on the wire.
+
+A character find (`f`, `F`, `t`, `T`) is a motion made of *two* keys, and the
+second one is any character at all — which a keymap cannot hold, since a keymap
+is a table from key sequences to command names. So the find is caught in the
+three places a key can arrive (normal mode, an operator waiting for its motion,
+and a selection) and the character is passed to the command as its parameter.
+What the find looked for is remembered on the editor, which is what `;` and `,`
+use to look again and what makes `df,` repeatable by `.` — the operator grammar
+passes the *motion's name*, so the character has to be somewhere the motion can
+find it.
+
+A command is a *change* if it made the buffer different or opened an insert
+session: the history counts its edits, and `Editor::run_command` compares the
+count around the call. That one fact is what `.` repeats, together with the keys
+an insert session typed — recorded as text as it is typed, with a backspace and a
+delete as tokens of their own, because replaying the keys is the only way
+`iab<BS>c<Esc>` repeats as `ac`. Motions, yanks, searches and `u` are not
+changes, so none of them disturbs the memory.
+
+An operator (`d`, `y`, `c`) is a pending state of the normal mode, and what
+finishes it is either a motion — looked up in the keymap, so a remapped `w` takes
+`dw` with it — or a text object, which is `i` or `a` followed by the key that
+names one. The object answers with a range directly — a range of characters, or
+of whole lines with their terminators, since a paragraph is lines — and
+everything after that is the same `cut`, `copy` and insert-mode entry the motions
+use. A linewise object also makes the *selection* linewise: the last character of
+a line is its terminator, and a normal-mode cursor cannot sit on one, so a
+linewise range has lines at its ends rather than characters. `E348: No string under cursor` is `*` with no
+word to search for.
 
 A command is `fn(&mut Editor, &[Param]) -> Result<()>` in a flat registry
 (`CommandRegistry`), addressable by name, with a numeric first parameter treated
@@ -130,6 +280,21 @@ and ignored — a config typo must not stop the editor from opening.
 | `E492: Not a command: X` | unknown name on the `:` line, or from `ed.run` |
 | `E5108: command nesting too deep` | runaway Lua command recursion |
 | `unmapped key: X` | normal-mode key with no binding |
+| `X is not a motion` | a key followed `d`, `y` or `c` that takes no range |
+| `E486: Pattern not found: X` | a search, or `n`, with no match left to find |
+| `E35: No previous search pattern` | `/` or `n` before anything was searched for |
+| `E54: …` | a pattern that does not compile; the engine's own explanation follows |
+| `E348: No string under cursor` | `*` or `#` with no word under the cursor |
+| `E85: There is no other buffer` | `:bn` or `:bp` with one document open |
+| `E85: There is no other window` | a `<C-w>` key with one window |
+| `E16: Invalid range` | `<C-w>h` `j` `k` `l` with no window that way |
+| `E94: No matching buffer for X` | `:b` with a name nothing is called |
+| `E471: Argument required` | `:s` with nothing after it |
+| `E488: Trailing characters: X` | a `:s` flag that is not `g` or `i` |
+| `N substitutions on M lines` | a `:s` that worked, and how much it changed |
+| nothing at all | a copy with an empty register: there is nothing to send |
+| `Already at oldest change` | `u` with nothing left to undo |
+| `Already at newest change` | `<C-r>` with nothing to redo |
 | `init.lua: ...` | the config failed to load |
 | `"path" written` / `"name"` | a successful write / a freshly opened file |
 
@@ -187,12 +352,16 @@ compiler-enforced.
   anywhere, so it cannot be registered under the wrong one.
 - **A new message**: add it to `ClientMsg`/`ServerMsg`, handle it in
   `Session::handle`. Frontends are free to ignore anything they do not know.
-- **A new frontend**: implement the framing, blit `Grid`, forward terminal keys
-  as `KeyMsg`. Nothing else is required — that is the whole contract.
+- **A new frontend**: use [`inkstone-client`](crates/inkstone-client) to start the
+  daemon and read its frames, fold them into an `inkstone_rpc::Screen`, draw the
+  rows it hands you, and turn your window's or terminal's events into `KeyMsg`s
+  (and `ClientMsg::Text` for anything that was never a key). Nothing else is
+  required — that is the whole contract.
+  [`docs/rendering.md`](docs/rendering.md) is what a second frontend needs
+  beyond it, and what a screen costs on the wire.
 
 ## Deliberate limitations
 
-- Sending a redraw per keystroke is fine at this size; there is no diffing.
 - Horizontal scroll is measured in characters, not display columns, so a tab in
   the scrolled-off region can leave the view a column off.
 - A brand-new empty file is written as one byte (`"\n"`), which is stable on

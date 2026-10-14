@@ -254,7 +254,7 @@ pub fn signature_text(answer: &Value) -> String {
     }
     let parameter = answer["activeParameter"]
         .as_u64()
-        .and_then(|index| signature["parameters"].as_array().map(|list| (index, list)))
+        .zip(signature["parameters"].as_array())
         .and_then(|(index, list)| list.get(index as usize).cloned())
         .and_then(|parameter| {
             // A parameter's label is a string, or a `[start, end]` pair of

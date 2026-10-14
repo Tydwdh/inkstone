@@ -466,3 +466,78 @@ fn gf_takes_a_count_and_gf_takes_a_line_number() {
         "the full stop is the sentence's"
     );
 }
+
+#[test]
+fn a_path_entry_can_search_upwards() {
+    // "include;/usr" searches `include`, then the directory it is in, and so on
+    // up to the stop directory — which is how a name in an `#include` line finds
+    // a header in a tree above it.
+    let dir = std::env::temp_dir().join("inkstone-path-up");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("project/src")).unwrap();
+    std::fs::write(dir.join("shared.h"), "// shared\n").unwrap();
+    std::fs::write(dir.join("project/local.h"), "// local\n").unwrap();
+    std::fs::write(dir.join("project/src/main.c"), "x\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    // `local.h` is not in `project/src`, but it is in the directory above it,
+    // and the entry says to keep looking up to `project`.
+    ed.buffer = Buffer::from_text("local.h\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!(
+        "set path={};{}",
+        dir.join("project/src").display(),
+        dir.join("project").display()
+    ));
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("local.h")),
+        "found in the directory above: {:?}",
+        ed.buffer.path()
+    );
+
+    // With no stop directory it goes to the root, which is what finds a file two
+    // levels up.
+    ed.buffer = Buffer::from_text("shared.h\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!("set path={};", dir.join("project/src").display()));
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("shared.h")),
+        "found two levels up: {:?}",
+        ed.buffer.path()
+    );
+
+    // A *relative* entry is walked the same way: `.` has no parent of its own, so
+    // the walk has to start from what it resolves to. This is the case a smoke
+    // test found and the absolute-path tests above did not.
+    let here = std::env::current_dir().expect("a working directory");
+    let _ = std::fs::write(here.join("inkstone-relative.h"), "// relative\n");
+    ed.buffer = Buffer::from_text("inkstone-relative.h\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!("set path=./src;{}", here.display()));
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("inkstone-relative.h")),
+        "found by walking up from a relative entry: {:?}",
+        ed.buffer.path()
+    );
+    let _ = std::fs::remove_file(here.join("inkstone-relative.h"));
+
+    // A directory that is not there ends the walk rather than searching above it.
+    ed.buffer = Buffer::from_text("shared.h\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!(
+        "set path={};{}",
+        dir.join("nowhere/src").display(),
+        dir.display()
+    ));
+    feed(&mut ed, "gf");
+    assert_eq!(ed.message, "E484: Can't open file shared.h");
+}

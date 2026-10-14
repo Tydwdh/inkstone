@@ -2971,6 +2971,32 @@ out of the text.
   there), `'includeexpr'`, `~user` and environment-variable expansion in the
   name, and the visual-mode `gf`, which uses the selection rather than `isfname`.
 
+## Done — the upward form of `'path'`
+
+The second of the manual's three kinds of file searching, and the one that makes
+`#include "x.h"` work: the name is not beside the file, it is somewhere *above*
+it.
+
+- **What shipped:** `include;/usr` — look in `include`, then in the directory it
+  is in, and so on up to the stop directory, which is searched too. `dir;` with
+  nothing after the semicolon goes to the root, and a directory that is not there
+  ends the walk rather than searching above it, which is what the manual asks
+  for ("Vim will skip the non-existing directory, and also does not search in the
+  parent of the non-existing directory if upwards searching is used").
+- **Constraints it had to respect, and how:** a relative entry has no parents to
+  walk — `.` resolves to the directory it is in, and `parent()` of `.` is the
+  empty path, so the walk stopped at once and found nothing. The walk therefore
+  starts from what the entry *resolves to* (`canonicalize`), and the candidate is
+  spelled the way a person would spell it, because `canonicalize` on Windows
+  answers with a `\\?\` prefix that is valid and noisy.
+- **What the tests could not see, and the smoke could:** the unit tests used
+  absolute paths, where the walk works, so they passed while `path=.;` in a
+  terminal found nothing. The relative case is a test of its own now — and the
+  smoke is what found it, which is the second time this feature has needed one.
+- **Files:** `inkstone-core` (`path_candidates`'s `;` branch, `tidy`).
+- **Left for later:** the combined `**;stop`, and the `cpoptions`/`d` rule about
+  where a relative upward search starts.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

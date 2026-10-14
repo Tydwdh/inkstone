@@ -3897,7 +3897,40 @@ fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Resul
 /// many as `**N` says. Only the downward half of `file-searching` is here; the
 /// upward `dir;/stop` form is not.
 fn path_candidates(entry: &Path, name: &str) -> Vec<std::path::PathBuf> {
-    if !entry.to_string_lossy().contains(['*', '?', '[', ']']) {
+    let text = entry.to_string_lossy().into_owned();
+    // The upward form, `dir;/stop`: the name is looked for in `dir` and in every
+    // directory above it, up to the stop directory — "include;/usr" looks in
+    // `include`, in the directory it is in, and so on until `/usr`. With no stop
+    // (`;`) it goes to the root. A directory that is not there ends the walk:
+    // "Vim will skip the non-existing directory, and also does not search in the
+    // parent of the non-existing directory if upwards searching is used".
+    if let Some((dir, stops)) = text.split_once(';') {
+        if !text.contains(['*', '?', '[', ']']) {
+            let stops: Vec<std::path::PathBuf> = stops
+                .split(';')
+                .filter(|stop| !stop.is_empty())
+                .map(std::path::PathBuf::from)
+                .collect();
+            let mut found = Vec::new();
+            // The walk needs a place with parents: `.` has none, and `..` from
+            // the current directory is not the same as the directory it is in.
+            // A directory that is not there resolves to nothing, which is the
+            // skip the manual asks for.
+            let mut at = std::fs::canonicalize(dir).ok();
+            while let Some(dir) = at {
+                if !dir.is_dir() {
+                    break;
+                }
+                found.push(tidy(dir.join(name)));
+                if stops.contains(&dir) {
+                    break;
+                }
+                at = dir.parent().map(std::path::Path::to_path_buf);
+            }
+            return found;
+        }
+    }
+    if !text.contains(['*', '?', '[', ']']) {
         return vec![entry.join(name)];
     }
     let mut pattern: Vec<String> = entry
@@ -3917,6 +3950,19 @@ fn path_candidates(entry: &Path, name: &str) -> Vec<std::path::PathBuf> {
     let mut found = Vec::new();
     match_directories(&base, &pattern, wild_at, &mut found);
     found
+}
+
+/// A path with Windows' `\\?\` prefix taken off.
+///
+/// `canonicalize` answers with it — a valid path, and one nobody types — and the
+/// candidate is a path a person reads in the status line, so it is spelled the
+/// way they would spell it.
+fn tidy(path: std::path::PathBuf) -> std::path::PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => std::path::PathBuf::from(rest),
+        None => path,
+    }
 }
 
 /// A path from components, with a prefix and a root kept together.

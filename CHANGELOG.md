@@ -26,6 +26,11 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- A `'path'` entry can search *upwards*, which is vim's second kind of file
+  searching: `include;/usr` looks in `include` and in every directory above it up
+  to the stop directory, and `dir;` goes to the root. A directory that is not
+  there ends the walk rather than searching above it. The combined form
+  (`**;/stop`) is not implemented.
 - `gf` takes a count — the count'th file the search finds — and reads a name the
   way vim does in one more respect: trailing punctuation (`.,:;!`) is not part of
   it, so `gf` on `see src/main.rs.` opens `src/main.rs`.

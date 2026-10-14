@@ -66,6 +66,70 @@ impl Editor {
         }
     }
 
+    /// Whether the file that is open has a value of its own for a setting, which
+    /// is the difference between `:setlocal x?` answering with an `=` and with a
+    /// `--` in front of it.
+    pub(super) fn has_local_option(&self, setting: Setting) -> bool {
+        self.local_options.iter().any(|(name, _)| *name == setting)
+    }
+
+    /// What a scope differs from the defaults in, as one line: the answer to
+    /// `:setlocal` or `:setglobal` with no argument, which in vim lists "all
+    /// local options which are different from the default".
+    ///
+    /// One line rather than a list window: it is a sentence about a handful of
+    /// settings, and the settings window is what `:set all` is for.
+    pub(super) fn scoped_settings_by_name(&self, scope: Scope) -> String {
+        let defaults = Options::default();
+        let mut parts = Vec::new();
+        for setting in Setting::ALL.iter().copied() {
+            let (value, differs) = match scope {
+                // A local value that is not the default, or one that is not the
+                // global value either way round.
+                Scope::Local => {
+                    let local = self
+                        .local_options
+                        .iter()
+                        .find(|(name, _)| *name == setting)
+                        .map(|(_, value)| value.clone());
+                    match local {
+                        Some(value) => (value, true),
+                        None => continue,
+                    }
+                }
+                // The global value, when it is not the default.
+                Scope::Global => {
+                    let value = self.global_options.get(setting);
+                    if value == defaults.get(setting) {
+                        continue;
+                    }
+                    (value, true)
+                }
+                Scope::Both => continue,
+            };
+            let _ = differs;
+            let text = match value {
+                Param::Bool(value) => value.to_string(),
+                Param::Int(value) => value.to_string(),
+                Param::Str(value) => value,
+                Param::Nil => String::new(),
+            };
+            parts.push(format!("{}={text}", setting.name()));
+        }
+        if parts.is_empty() {
+            return match scope {
+                Scope::Local => "no local values".to_string(),
+                _ => "no global values differ from the defaults".to_string(),
+            };
+        }
+        format!(
+            "{} value{}: {}",
+            parts.len(),
+            if parts.len() == 1 { "" } else { "s" },
+            parts.join(" ")
+        )
+    }
+
     /// The value outside any file: what `:setglobal {name}?` shows.
     pub(crate) fn global_option_text(&self, setting: Setting) -> String {
         match self.global_options.get(setting) {

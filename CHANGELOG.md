@@ -26,6 +26,11 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- The rest of `:setlocal`/`:setglobal`: with no argument they name the values
+  that scope is holding (vim's "all local options which are different from the
+  default"), and `:setlocal {name}?` answers `--{name}={value}` when the file has
+  no value of its own and the global one is what is in use — vim's marker for
+  exactly that.
 - `'smartcase'`: with `'ignorecase'` on, a pattern that has an upper case letter
   in it is taken literally — `/Foo` finds `Foo`, `/foo` finds either. It applies
   to `/`, `?`, `n`, `N`, `:g` and `:s`, which is vim's own list for it.

@@ -820,6 +820,15 @@ impl Editor {
             self.open_settings_window();
             return;
         }
+        // With no argument at all, a scoped `:setlocal`/`:setglobal` says what
+        // that scope differs from the defaults in — "display local values for all
+        // local options which are different from the default", in the manual's
+        // words. `:set` on its own is not one of them: there is nothing to
+        // compare it with.
+        if name.is_empty() && matches!(scope, Scope::Local | Scope::Global) {
+            self.message = self.scoped_settings_by_name(scope);
+            return;
+        }
         if value.is_empty() {
             if let Some(rest) = name.strip_prefix("inv") {
                 match crate::settings::Setting::from_name(rest) {
@@ -873,11 +882,20 @@ impl Editor {
                 // this file's value, `:setglobal?` the one outside every file,
                 // and `:set?` the value in force here.
                 let text = match scope {
-                    Scope::Local => self.local_option_text(setting),
-                    Scope::Global => self.global_option_text(setting),
-                    Scope::Both => self.option_text(setting),
+                    // "When the global value is being used, `--` is displayed
+                    // before the option name": the file has no value of its own
+                    // and the answer is the one every file gets.
+                    Scope::Local
+                        if self.local_option_text(setting).is_empty()
+                            || !self.has_local_option(setting) =>
+                    {
+                        format!("--{}={}", name, self.global_option_text(setting))
+                    }
+                    Scope::Local => format!("{name}={}", self.local_option_text(setting)),
+                    Scope::Global => format!("{name}={}", self.global_option_text(setting)),
+                    Scope::Both => format!("{name}={}", self.option_text(setting)),
                 };
-                self.message = format!("{name}={text}");
+                self.message = text;
             }
             Some(setting) => match self.set_option(setting, &value, scope) {
                 Ok(()) => {

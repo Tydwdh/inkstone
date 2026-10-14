@@ -538,7 +538,10 @@ exactly:
 So `:setlocal tabstop=2` in one file leaves every other file at the global
 value, and coming back to that file brings its `2` with it. Asking follows the
 same three spellings: `:setlocal tabstop?` is this file's value, `:setglobal
-tabstop?` the one outside every file, and `:set tabstop?` the one in force.
+tabstop?` the one outside every file, and `:set tabstop?` the one in force. A
+`:setlocal` whose answer is the global value is written with vim's `--` in front
+(`--tabstop=4`), and with no argument at all `:setlocal` and `:setglobal` name
+the values that scope is holding.
 
 Saving can ask the server to lay the file out first: `formatonsave` (off by default)
 makes `:w` write the file and then ask for `textDocument/formatting`, applying what

@@ -150,12 +150,42 @@ fn the_three_spellings_ask_about_their_own_value() {
     ed.execute_cmdline("set tabstop?");
     assert_eq!(ed.message, "tabstop=2", "and what is in force here");
 
-    // A file with no value of its own answers with the global one.
+    // A file with no value of its own answers with the global one, and vim's
+    // `--` says so: "when the global value is being used, `--` is displayed
+    // before the option name".
     ed.execute_cmdline("setlocal autoindent");
     assert!(
         ed.options.borrow().autoindent,
         "a switch this file turned on"
     );
     ed.execute_cmdline("setlocal number?");
-    assert_eq!(ed.message, "number=false", "there is nothing of its own");
+    assert_eq!(ed.message, "--number=false", "the global value, marked");
+    ed.execute_cmdline("setlocal number");
+    ed.execute_cmdline("setlocal number?");
+    assert_eq!(ed.message, "number=true", "and now it is this file's own");
+
+    // With no argument, a scoped `:set` says what that scope is holding.
+    ed.execute_cmdline("setglobal tabstop=8");
+    ed.execute_cmdline("setlocal");
+    assert!(
+        ed.message.starts_with("3 values: "),
+        "counted, and plural: {}",
+        ed.message
+    );
+    assert!(
+        ed.message.contains("autoindent=true") && ed.message.contains("number=true"),
+        "what this file says: {}",
+        ed.message
+    );
+    assert!(
+        !ed.message.contains("textwidth"),
+        "a setting nobody set is not in it: {}",
+        ed.message
+    );
+    ed.execute_cmdline("setglobal");
+    assert!(
+        ed.message.contains("tabstop=8"),
+        "what every other file gets: {}",
+        ed.message
+    );
 }

@@ -2830,6 +2830,29 @@ along.
 - **Left for later:** `'ignorecase'` in the completion popup's own filtering
   (vim's list mentions it), and `'tagcase'`.
 
+## Done — the rest of `:setlocal`
+
+The two things the scopes entry left for later, both small and both vim's own
+spellings.
+
+- **What shipped:** `:setlocal` and `:setglobal` with no argument name the values
+  that scope is holding — "display local values for all local options which are
+  different from the default", in the manual's words — as one counted line; and
+  `:setlocal {name}?` answers `--name=value` when the file has no value of its
+  own, which is vim's way of saying "this is the global value, not yours".
+- **Constraints it had to respect, and how:** the listing is a *message* rather
+  than a list window: it is a sentence about a handful of settings, and the
+  settings window is what `:set all` is for. The `--` needed one new question —
+  "does this file have a value of its own for that setting" — which is a
+  different question from "what does it answer with", and the difference is
+  exactly the marker.
+- **What the smoke found:** `1 values: tabstop=2`. The count was right and the
+  plural was not — the same nit the fold marker had.
+- **Files:** `inkstone-core` (`ex_set`'s no-argument branch, `scoped_settings_by_name`,
+  `has_local_option`, the `--` in the query arm).
+- **Left for later:** `:set {name}?` in a *window*, `ed.set` writing the global
+  value, and vim's `:setlocal!` (which makes the local value the default).
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

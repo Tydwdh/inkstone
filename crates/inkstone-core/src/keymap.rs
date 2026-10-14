@@ -78,6 +78,7 @@ impl Keymap {
             ("g-", &["undo_earlier"]),
             ("g+", &["undo_later"]),
             ("K", &["hover"]),
+            ("gF", &["goto_file_line"]),
             ("gd", &["goto_definition"]),
             ("gr", &["goto_references"]),
             ("]d", &["next_diagnostic"]),

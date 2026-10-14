@@ -119,6 +119,7 @@ notation;
 | n | `<C-w> _` | `resize_vertical` |
 | n | `G` | `goto_last_line` |
 | n | `g f` | `goto_file` |
+| n | `g F` | `goto_file_line` |
 | n | `J` | `join` |
 | n | `z f` | `fold_motion` |
 | n | `z o` | `fold_open` |
@@ -417,9 +418,12 @@ name in an `import` line finds a file in another directory (`:set path=src,tests
 entry may hold a wildcard, which is vim's `file-searching`: `*` is a run of
 characters within one name, and a component that is exactly `**` means that
 directory and everything under it — thirty levels, or as many as `**5` says — so
-`:set path=**` finds a file anywhere under the one that is open. A name that is not
-there says `E484` rather than being made into a new file: `:e` is how a person makes
-one, and `gf` is a jump.
+`:set path=**` finds a file anywhere under the one that is open. A count takes the
+count'th file the search finds (`2gf`), trailing punctuation is not part of the name
+(`see src/main.rs.` is `src/main.rs`), and `gF` reads a number after the name as a
+line to put the cursor on (`src/main.rs 42`). A name that is not there says `E484`
+rather than being made into a new file: `:e` is how a person makes one, and `gf` is
+a jump.
 
 `*` and `#` search for the word under the cursor, forwards and backwards.
 

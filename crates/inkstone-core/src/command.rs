@@ -95,6 +95,7 @@ impl CommandRegistry {
         join_tight,
         join_tight_visual,
         goto_file,
+        goto_file_line,
         command_history,
         search_history,
         block_to_end,
@@ -3821,7 +3822,20 @@ fn fold_delete(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 /// The name is read the way vim reads it, by what a file name is *made of* rather
 /// than by what a word is: `src/main.rs` is one file name and three words, and a
 /// `gf` that took the word would open `main`.
-fn goto_file(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+fn goto_file(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    goto_file_at(editor, count(params), None)
+}
+
+/// `gF` — the same, with the cursor put on the line a number after the name
+/// names.
+fn goto_file_line(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let line = line_after_cursor(editor);
+    goto_file_at(editor, count(params), line)
+}
+
+/// Open the file under the cursor: "if a [count] is given, the count'th file
+/// that is found in the 'path' is edited".
+fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Result<()> {
     let Some(name) = file_name_under_cursor(editor) else {
         editor.message = "E484: No file name under the cursor".to_string();
         return Ok(());
@@ -3845,7 +3859,11 @@ fn goto_file(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     for dir in entries.iter() {
         candidates.extend(path_candidates(dir, &name));
     }
-    let Some(path) = candidates.into_iter().find(|path| path.is_file()) else {
+    let Some(path) = candidates
+        .into_iter()
+        .filter(|path| path.is_file())
+        .nth(count.saturating_sub(1))
+    else {
         editor.message = format!("E484: Can't open file {name}");
         return Ok(());
     };
@@ -3857,7 +3875,14 @@ fn goto_file(editor: &mut Editor, _params: &[Param]) -> Result<()> {
         return Ok(());
     }
     match editor.open_file(&path) {
-        Ok(()) => editor.message = format!("\"{}\"", path.display()),
+        Ok(()) => {
+            editor.message = format!("\"{}\"", path.display());
+            if let Some(line) = line {
+                let last = editor.buffer.line_count().saturating_sub(1);
+                editor.cursor = crate::cursor::Cursor::new((line - 1).min(last), 0);
+                editor.after_edit();
+            }
+        }
         Err(_) => editor.message = format!("E484: Can't open file {name}"),
     }
     Ok(())
@@ -4076,10 +4101,38 @@ fn file_name_under_cursor(editor: &Editor) -> Option<String> {
         end += 1;
     }
     let name = buffer.slice_text(start, end);
+    // "Trailing punctuation characters ".,:;!" are ignored": a name in a
+    // sentence is a name, and the full stop after it is the sentence's.
+    let name = name.trim_end_matches(['.', ',', ':', ';', '!']).to_string();
     // A name has to have something in it that is not punctuation: `...` is not a
     // file, and neither is a lone `/`.
     let has_content = name.chars().any(|c| c.is_alphanumeric());
     (has_content && !name.contains('\n')).then_some(name)
+}
+
+/// The line number written after the name, for `gF`: "if a number follows the
+/// file name, then the cursor is positioned on that line in the file".
+fn line_after_cursor(editor: &Editor) -> Option<usize> {
+    let buffer = &editor.buffer;
+    let mut at = editor.cursor.char_idx(buffer);
+    // Past the name the cursor is on.
+    while buffer.char_at(at).is_some_and(|c| {
+        c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '\\' | '~' | ':')
+    }) {
+        at += 1;
+    }
+    while buffer.char_at(at).is_some_and(char::is_whitespace) {
+        at += 1;
+    }
+    let mut digits = String::new();
+    while let Some(c) = buffer.char_at(at) {
+        if !c.is_ascii_digit() {
+            break;
+        }
+        digits.push(c);
+        at += 1;
+    }
+    digits.parse::<usize>().ok().filter(|line| *line > 0)
 }
 
 /// `I` over a block — the same typing at the left edge of every row.

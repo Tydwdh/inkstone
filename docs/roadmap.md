@@ -2946,6 +2946,31 @@ than merely present: a leaf you cannot go to is a report, not a tool.
   `parse_offset`, `undo_list_text`'s numbers).
 - **Left for later:** `{N}f`, and `'undolevels'`.
 
+## Done — `[count]gf`, `gF`, and the name's edges
+
+Three of the small rules `:h gf` lists, all in the one function that reads a name
+out of the text.
+
+- **What shipped:** `[count]gf` edits "the count'th file that is found in the
+  'path'"; trailing punctuation (`.,:;!`) is not part of a name, so `see
+  src/main.rs.` opens `src/main.rs`; and `gF` reads a number after the name as a
+  line in the file — "the cursor is positioned on that line" — which is the one
+  rule that needed the *text after* the name rather than the name.
+- **Constraints it had to respect, and how:** the count picks from the
+  *candidates*, not from the wildcard matches: the entries are searched in the
+  order they are written, so `2gf` is the second file the whole search finds,
+  which is what the manual says and what makes it useful with two entries that
+  hold the same name. The line number is clamped to the file, since a number
+  past its end is a person's arithmetic rather than a reason to refuse.
+- **What the smoke showed:** `2gf` opening the second of two files with the same
+  name, and `gF` on `same.rs 2` landing with the status line reading `2:1` — the
+  line number is the one thing a unit test can only assert, not show.
+- **Files:** `inkstone-core` (`goto_file_at`, `goto_file_line`, `line_after_cursor`,
+  the trailing-punctuation trim, the `gF` binding and its README row).
+- **Left for later:** `'suffixesadd'` (a suffix to try when the name is not
+  there), `'includeexpr'`, `~user` and environment-variable expansion in the
+  name, and the visual-mode `gf`, which uses the selection rather than `isfname`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

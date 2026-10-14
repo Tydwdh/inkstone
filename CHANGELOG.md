@@ -26,6 +26,11 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `gf` takes a count — the count'th file the search finds — and reads a name the
+  way vim does in one more respect: trailing punctuation (`.,:;!`) is not part of
+  it, so `gf` on `see src/main.rs.` opens `src/main.rs`.
+- `gF` is `gf` with a line: a number after the name is a line in the file, and the
+  cursor is put there (`src/main.rs 42`).
 - `'path'` entries can hold vim's file-searching wildcards: `*` for a run of
   characters within one name, and a component that is exactly `**` for that
   directory and everything under it (thirty levels, or as many as `**5` says).

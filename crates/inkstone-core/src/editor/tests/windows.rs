@@ -421,3 +421,48 @@ fn a_path_entry_can_hold_a_wildcard() {
     feed(&mut ed, "gf");
     assert_eq!(ed.message, "E484: Can't open file two.rs");
 }
+
+#[test]
+fn gf_takes_a_count_and_gf_takes_a_line_number() {
+    let dir = std::env::temp_dir().join("inkstone-gf-count");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("one")).unwrap();
+    std::fs::create_dir_all(dir.join("two")).unwrap();
+    std::fs::write(dir.join("one/same.rs"), "first\n").unwrap();
+    std::fs::write(dir.join("two/same.rs"), "second\nthird\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("same.rs\n");
+    ed.cursor = Cursor::new(0, 0);
+    // The entries are searched in order, so the count picks which one.
+    ed.execute_cmdline(&format!(
+        "set path={},{}",
+        dir.join("one").display(),
+        dir.join("two").display()
+    ));
+    feed(&mut ed, "gf");
+    assert_eq!(ed.buffer.text(), "first\n", "the first one found");
+    ed.execute_cmdline("e #");
+    ed.buffer = Buffer::from_text("same.rs\n");
+    ed.cursor = Cursor::new(0, 0);
+    feed(&mut ed, "2gf");
+    assert_eq!(ed.buffer.text(), "second\nthird\n", "the second one found");
+
+    // `gF` takes the number after the name as a line in the file.
+    ed.buffer = Buffer::from_text("same.rs 2\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!("set path={}", dir.join("two").display()));
+    feed(&mut ed, "gF");
+    assert_eq!(ed.buffer.text(), "second\nthird\n");
+    assert_eq!(ed.cursor.row, 1, "on the line the number named");
+
+    // Trailing punctuation is not part of the name: a name in a sentence.
+    ed.buffer = Buffer::from_text("see same.rs.\n");
+    ed.cursor = Cursor::new(0, 6);
+    feed(&mut ed, "gf");
+    assert_eq!(
+        ed.buffer.text(),
+        "second\nthird\n",
+        "the full stop is the sentence's"
+    );
+}

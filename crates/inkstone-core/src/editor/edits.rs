@@ -43,10 +43,6 @@ impl Editor {
             let delta = self.buffer.line_count() as isize - lines_before as isize;
             self.shift_folds(at, delta);
         }
-        // And the state this edit *leaves*, one index on: the history is about to gain
-        // this step, and a redo back to it has to find the folds it produced.
-        self.fold_states.truncate(self.history.steps() + 1);
-        self.fold_states.push(self.folds.clone());
         if let Some(index) = after {
             self.cursor.set_char_idx(&self.buffer, index);
         }
@@ -63,6 +59,10 @@ impl Editor {
         let caret = after.map_or(0, |index| index.saturating_sub(start));
         self.history
             .push(change.settled(self.cursor).with_caret(caret));
+        // The state this edit left is the one the history has just made — or the
+        // one it grew — and the folds it produced belong to it. This is *after*
+        // the push because that is what says which state it is.
+        self.record_fold_state();
         // A match is a pair of character indices, and the edit has just moved
         // them: the search looks again rather than pointing at the wrong text.
         self.search.refresh(&self.buffer);
@@ -177,6 +177,69 @@ impl Editor {
             }
             None => false,
         }
+    }
+
+    /// Go to the state `count` older in the order the states were *made* —
+    /// `g-`, and `:earlier {count}`.
+    ///
+    /// Not the same as [`Editor::undo`]: `u` walks the branch the text is on, and
+    /// this walks time. Undo twice, edit, and `u` takes the edit back while `g-`
+    /// goes to what was undone.
+    pub fn goto_older(&mut self, count: usize) -> bool {
+        match self.history.earlier(count) {
+            Some(target) => self.goto_state(target),
+            None => {
+                self.message = "E831: Cannot go back that far".to_string();
+                false
+            }
+        }
+    }
+
+    /// Go to the state `count` newer in the order the states were made — `g+`,
+    /// and `:later {count}`.
+    pub fn goto_newer(&mut self, count: usize) -> bool {
+        match self.history.later(count) {
+            Some(target) => self.goto_state(target),
+            None => {
+                self.message = "E831: Cannot go forward that far".to_string();
+                false
+            }
+        }
+    }
+
+    /// Move the text to the state at `target`, whichever branch it is on.
+    fn goto_state(&mut self, target: usize) -> bool {
+        match self.history.goto(target, &mut self.buffer) {
+            Some(cursor) => {
+                self.cursor = cursor;
+                self.restore_folds();
+                self.after_edit();
+                self.highlighter.invalidate(self.cursor.row);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// What `:undolist` shows: the states nothing was made from, with how deep
+    /// each is and how long ago it was made.
+    pub fn undo_list_text(&self) -> String {
+        let leaves = self.history.leaves();
+        if leaves.is_empty() {
+            return "no changes".to_string();
+        }
+        let mut parts = vec![format!("{} leaves", leaves.len())];
+        for (index, age) in leaves.iter().take(8) {
+            parts.push(format!(
+                "{} changes {}",
+                self.history.depth_of(*index),
+                ago(*age)
+            ));
+        }
+        if leaves.len() > 8 {
+            parts.push(format!("... {} more", leaves.len() - 8));
+        }
+        parts.join("   ")
     }
 
     // -- helpers used by commands ------------------------------------------
@@ -709,5 +772,17 @@ impl Editor {
         // `''` is not a walk through the list: it is the one place the last jump
         // started, so that pressing it twice comes back.
         self.jump_from = Some(self.cursor);
+    }
+}
+
+/// How long ago, in words: `:undolist` says "3 seconds ago" for anything
+/// recent, and the minutes and hours after that.
+fn ago(age: std::time::Duration) -> String {
+    let seconds = age.as_secs();
+    match seconds {
+        0..=1 => "now".to_string(),
+        2..=59 => format!("{seconds} seconds ago"),
+        60..=3599 => format!("{} minutes ago", seconds / 60),
+        _ => format!("{} hours ago", seconds / 3600),
     }
 }

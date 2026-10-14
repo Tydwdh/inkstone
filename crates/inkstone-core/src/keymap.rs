@@ -72,6 +72,11 @@ impl Keymap {
             ("w", &["move_word_forward"]),
             ("b", &["move_word_backward"]),
             ("gg", &["goto_first_line"]),
+            // `g-` and `g+`: the states either side of this one in the order
+            // they were *made*, which is how a person gets back to an undone
+            // branch.
+            ("g-", &["undo_earlier"]),
+            ("g+", &["undo_later"]),
             ("K", &["hover"]),
             ("gd", &["goto_definition"]),
             ("gr", &["goto_references"]),

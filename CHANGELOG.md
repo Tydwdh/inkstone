@@ -58,6 +58,16 @@
   the global value, and coming back brings the file's values with it — and asking
   follows the same three spellings.
 
+### Added
+- The undo tree: undoing and then editing again no longer throws the undone
+  branch away. `u`/`<C-r>` walk the branch the text is on, `g-`/`g+` (with
+  counts) walk the states in the order they were *made* whichever branch they are
+  on, `:earlier {count}`/`:later {count}` are the same from the `:` line, and
+  `:undolist` names the leaves of the tree with how deep and how old each is.
+  Vim's time forms (`:earlier 10s`, `1f`) are not implemented.
+- `:undolist` counts leaves, not states: a state something else was made from is
+  not one.
+
 ### Changed
 - The kernel's internals were reorganized for legibility, with no change in
   behaviour. `editor.rs` (14,705 lines: one 6,157-line `impl` block and half its

@@ -183,6 +183,11 @@ impl CommandRegistry {
         search_backward,
         search_next,
         search_previous,
+        undo_earlier,
+        undo_later,
+        earlier,
+        later,
+        undolist,
         nohlsearch,
         escape,
         save,
@@ -1485,6 +1490,56 @@ fn nohlsearch(editor: &mut Editor, _params: &[Param]) -> Result<()> {
         return Ok(());
     }
     editor.search_highlight_off();
+    Ok(())
+}
+
+/// `g-` — the state the text was in before this one, counting the states in the
+/// order they were *made*: what an undo after an undo-and-edit gets back to.
+fn undo_earlier(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    editor.goto_older(count(params));
+    Ok(())
+}
+
+/// `g+` — the state made after this one, in the same order.
+fn undo_later(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    editor.goto_newer(count(params));
+    Ok(())
+}
+
+/// `:earlier {count}` and `:later {count}`: the same two, from the `:` line. The
+/// time forms vim also takes (`{N}s`, `{N}f`) are not implemented.
+fn earlier(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let spec = motion_param(params).unwrap_or_default();
+    let (count, rest) = split_count(spec);
+    if !rest.is_empty() {
+        editor.message = "E475: only a count is understood: {rest}".to_string();
+        return Ok(());
+    }
+    editor.goto_older(count);
+    Ok(())
+}
+
+fn later(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let spec = motion_param(params).unwrap_or_default();
+    let (count, rest) = split_count(spec);
+    if !rest.is_empty() {
+        editor.message = format!("E475: only a count is understood: {rest}");
+        return Ok(());
+    }
+    editor.goto_newer(count);
+    Ok(())
+}
+
+/// The count at the front of a `:` argument, and what is left of it.
+fn split_count(spec: &str) -> (usize, String) {
+    let digits: String = spec.chars().take_while(char::is_ascii_digit).collect();
+    let count = digits.parse::<usize>().unwrap_or(1).max(1);
+    (count, spec[digits.len()..].trim().to_string())
+}
+
+/// `:undolist` — the leaves of the tree of changes, with how deep each is.
+fn undolist(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    editor.message = editor.undo_list_text();
     Ok(())
 }
 

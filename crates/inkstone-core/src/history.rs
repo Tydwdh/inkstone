@@ -201,10 +201,16 @@ fn with_restored_newline(buffer: &Buffer, start: usize, end: usize, text: &str) 
 /// The steps that were applied, and the ones that were undone.
 #[derive(Debug, Clone)]
 pub struct History {
-    /// Applied steps, oldest first.
-    past: Vec<Change>,
-    /// Steps that were undone, most recently undone last.
-    future: Vec<Change>,
+    /// Every state the text has been in, in the order they were *made* — which
+    /// is not the order they are related in. Undoing and then editing again adds
+    /// a state whose parent is an older one, and what comes out is the undo
+    /// *tree* vim has rather than a stack: nothing is thrown away, and `g-` and
+    /// `g+` walk the states in the order they were made whatever branch they are
+    /// on. `states[0]` is the state the buffer arrived in, which has no change
+    /// of its own.
+    states: Vec<State>,
+    /// Which of them the text is in now.
+    current: usize,
     /// The identity of the state an empty history stands for: the file as it
     /// was read, or the empty buffer as it was made.
     base_state: u64,
@@ -220,14 +226,28 @@ pub struct History {
     edits: u64,
     /// How many groups are open. Zero means every step stands alone.
     depth: usize,
-    /// Index in `past` of the entry the open group is building, once it has one.
-    entry: Option<usize>,
-    /// Index in `past` of the first step the outermost open group made. Those
-    /// steps become one when the group closes.
+    /// Index in `states` of the first state the outermost open group made.
     group_start: usize,
     /// The id handed to the group being recorded. Every group gets one of its
     /// own, so a group whose steps cannot fold can still be undone whole.
     group_id: u32,
+}
+
+/// One state the text has been in.
+///
+/// The change is what turned the parent into it, and the parent is what undo
+/// goes back to. A state is an *identity* as well as a place in the tree: the
+/// identity is what `is_dirty` compares, and it is handed out fresh whenever a
+/// step is grown, because a state that has been edited is not the state that was
+/// written.
+#[derive(Debug, Clone)]
+struct State {
+    /// The step that produced this state; `None` only for the first.
+    change: Option<Change>,
+    /// The state it was made from; `None` only for the first.
+    from: Option<usize>,
+    /// When it was made, for `:undolist`.
+    at: std::time::Instant,
 }
 
 /// Fold a group's steps into the one replacement that has the same effect, or
@@ -370,18 +390,19 @@ fn boundary(text: &str, chars: usize) -> usize {
 impl Default for History {
     fn default() -> Self {
         Self {
-            past: Vec::new(),
-            future: Vec::new(),
-            depth: 0,
-            entry: None,
-            group_start: 0,
-            group_id: 0,
-            // Zero is the state a file that has just been read is in. The first
-            // step gets one of its own, so an edit is never mistaken for it.
+            states: vec![State {
+                change: None,
+                from: None,
+                at: std::time::Instant::now(),
+            }],
+            current: 0,
             base_state: 0,
             saved_state: 0,
             next_state: 1,
             edits: 0,
+            depth: 0,
+            group_start: 0,
+            group_id: 0,
         }
     }
 }
@@ -397,9 +418,10 @@ impl History {
     /// Steps hold character indices into the document that was being edited, so
     /// they cannot be replayed onto a different one.
     pub fn clear(&mut self) {
-        self.past.clear();
-        self.future.clear();
-        self.entry = None;
+        self.states.truncate(1);
+        self.states[0].change = None;
+        self.states[0].from = None;
+        self.current = 0;
     }
 
     /// Forget every step: the text now is what it was when it arrived — a file
@@ -407,9 +429,9 @@ impl History {
     /// identity that came before is behind it.
     pub(crate) fn reset(&mut self) {
         self.clear();
-        self.base_state = self.next_state;
+        self.base_state = self.take_state();
         self.saved_state = self.base_state;
-        self.next_state += 1;
+        self.states[0].at = std::time::Instant::now();
     }
 
     /// How many edits have been recorded. It only ever grows: a command is a
@@ -418,13 +440,52 @@ impl History {
         self.edits
     }
 
-    /// How many steps can be undone, which is where in the history the editor is.
+    /// Which state the text is in: an index into the states, in the order they
+    /// were made.
     ///
-    /// The editor keeps the folds in step with this: folds are not text, so they are
-    /// not *in* the history, and a fold put on a line that an undo takes away has to
-    /// come back with it.
-    pub(crate) fn steps(&self) -> usize {
-        self.past.len()
+    /// The editor keeps the folds in step with this: folds are not text, so they
+    /// are not *in* the history, and a fold put on a line that an undo takes away
+    /// has to come back with it. One entry per state, and never thrown away —
+    /// a state that an undo left behind is still reachable by `g-`.
+    pub(crate) fn state_index(&self) -> usize {
+        self.current
+    }
+
+    /// How many states there are, the one the buffer arrived in included. Only
+    /// the tests ask: what the editor needs is which state it is in.
+    #[cfg(test)]
+    pub(crate) fn state_count(&self) -> usize {
+        self.states.len()
+    }
+
+    /// Every state that nothing else was made from, with its index and how long
+    /// ago it was made: what `:undolist` shows.
+    pub(crate) fn leaves(&self) -> Vec<(usize, std::time::Duration)> {
+        let mut parents = vec![false; self.states.len()];
+        for state in &self.states {
+            if let Some(from) = state.from {
+                parents[from] = true;
+            }
+        }
+        let now = std::time::Instant::now();
+        self.states
+            .iter()
+            .enumerate()
+            .filter(|(index, state)| state.change.is_some() && !parents[*index])
+            .map(|(index, state)| (index, now.duration_since(state.at)))
+            .collect()
+    }
+
+    /// How many changes deep a state is: the length of the path from the state
+    /// the buffer arrived in.
+    pub(crate) fn depth_of(&self, index: usize) -> usize {
+        let mut depth = 0;
+        let mut at = self.states.get(index).and_then(|state| state.from);
+        while let Some(parent) = at {
+            depth += 1;
+            at = self.states[parent].from;
+        }
+        depth
     }
 
     /// Whether the text has been changed since it was last written.
@@ -437,9 +498,12 @@ impl History {
         self.current_state() != self.saved_state
     }
 
-    /// Which state the text is in now.
+    /// Which state the text is in now, by identity.
     fn current_state(&self) -> u64 {
-        self.past.last().map_or(self.base_state, |step| step.state)
+        self.states[self.current]
+            .change
+            .as_ref()
+            .map_or(self.base_state, |change| change.state)
     }
 
     /// Say that the state the text is in now is the one that was written.
@@ -451,7 +515,7 @@ impl History {
     /// as it was when it arrived. A flag on the buffer cannot say this, because
     /// `Buffer::empty` is born "modified".
     pub(crate) fn is_untouched(&self) -> bool {
-        self.past.is_empty() && self.future.is_empty()
+        self.states.len() == 1
     }
 
     /// Start a group: the steps recorded before it closes collapse into one.
@@ -460,7 +524,7 @@ impl History {
     /// already open — and only the outermost one decides what a `u` takes back.
     pub(crate) fn begin_group(&mut self) {
         if self.depth == 0 {
-            self.group_start = self.past.len();
+            self.group_start = self.states.len();
             // Every group gets an id of its own, so a group whose steps cannot
             // fold can still be undone as one.
             self.group_id += 1;
@@ -481,21 +545,29 @@ impl History {
         if self.depth > 0 {
             return;
         }
-        self.entry = None;
         let start = self.group_start;
-        if self.past.len() > start + 1 {
-            if let Some(merged) = coalesce(&self.past[start..], buffer) {
-                self.past.truncate(start);
-                // The folded change stands alone: there is nothing left to undo
-                // together.
-                self.past.push(Change { group: 0, ..merged });
-            } else if let Some(merged) = merge_run(&self.past[start..], buffer) {
-                // Steps that overlap cannot be *read* as one replacement, but the
-                // group can still *become* one: the buffer is taken back to what it
-                // was before the group, the span is read there, and the steps are
-                // applied again.
-                self.past.truncate(start);
-                self.past.push(Change { group: 0, ..merged });
+        if self.states.len() > start + 1 {
+            let steps: Vec<Change> = self.states[start..]
+                .iter()
+                .filter_map(|state| state.change.clone())
+                .collect();
+            let folded = coalesce(&steps, buffer).or_else(|| merge_run(&steps, buffer));
+            if let Some(merged) = folded {
+                // The states of the group become one state: the buffer is where
+                // the last of them left it, so the parent is the state the group
+                // started from, and the merged change says the whole of what it
+                // did.
+                let from = self.states[start].from;
+                self.states.truncate(start);
+                let mut merged = merged;
+                merged.group = 0;
+                merged.state = self.take_state();
+                self.states.push(State {
+                    change: Some(merged),
+                    from,
+                    at: std::time::Instant::now(),
+                });
+                self.current = self.states.len() - 1;
             }
             // When even that fails, the steps stay as they are, and undo takes
             // them back together: the id they were given is what says so.
@@ -514,29 +586,41 @@ impl History {
             // an empty buffer is the whole of it. There is nothing to undo.
             return;
         }
-        // Anything that was undone is unreachable from here on.
-        self.future.clear();
-        if let Some(index) = self.entry {
-            // Steps of *different* groups do not join, however adjacent they are:
-            // a group that cannot fold is undone as a run of steps, and a run is
-            // only a run if nothing outside it is in it.
-            let same_group = self.past[index].group == change.group;
-            if same_group && self.past[index].absorb(&change) {
-                // Growing a step makes a *new* state out of the one it grew
-                // from, even when the change joined it: a state that has been
-                // edited is not the state that was written.
-                self.past[index].state = self.take_state();
-                self.edits += 1;
-                return;
+        // A step that continues the one before it joins it, which is what makes
+        // typing a word one step rather than seven. Only inside a group: two
+        // commands that happen to touch the same place are two `u`, however
+        // adjacent they are.
+        if self.depth > 0 {
+            let same_group = self.states[self.current]
+                .change
+                .as_ref()
+                .is_some_and(|before| before.group == change.group);
+            if same_group {
+                let absorbed = self.states[self.current]
+                    .change
+                    .as_mut()
+                    .is_some_and(|before| before.absorb(&change));
+                if absorbed {
+                    // Growing a step makes a *new* state out of the one it grew
+                    // from, even when the change joined it: a state that has been
+                    // edited is not the state that was written.
+                    let identity = self.take_state();
+                    if let Some(before) = self.states[self.current].change.as_mut() {
+                        before.state = identity;
+                    }
+                    self.edits += 1;
+                    return;
+                }
             }
         }
-        let mut change = change;
         change.state = self.take_state();
-        self.past.push(change);
+        self.states.push(State {
+            change: Some(change),
+            from: Some(self.current),
+            at: std::time::Instant::now(),
+        });
+        self.current = self.states.len() - 1;
         self.edits += 1;
-        if self.depth > 0 {
-            self.entry = Some(self.past.len() - 1);
-        }
     }
 
     /// The next state identity.
@@ -546,62 +630,138 @@ impl History {
         state
     }
 
-    /// Undo the newest step against `buffer`, returning the cursor it wants.
+    /// Undo the step that made the state the text is in, against `buffer`.
     ///
-    /// `None` means there is nothing left to undo.
+    /// `None` means there is nothing left to undo — the text is in the state the
+    /// buffer arrived in.
     pub(crate) fn undo(&mut self, buffer: &mut Buffer) -> Option<Cursor> {
-        let change = self.past.pop()?;
+        let state = self.states.get(self.current)?;
+        let change = state.change.clone()?;
+        let from = state.from?;
         // A group that could not fold is undone whole: its steps are undone in
         // the reverse of the order they were made, which is what makes each one's
         // coordinates valid again as it is reached.
         let group = change.group;
         let mut cursor = self.undo_one(change, buffer);
+        self.current = from;
+        // A group that could not fold keeps its id, and its steps are the ones
+        // between here and where the group started: they go back together.
         if group != 0 {
-            while self.past.last().is_some_and(|next| next.group == group) {
-                let next = self.past.pop().expect("just looked at it");
-                cursor = self.undo_one(next, buffer);
+            while let Some((change, from)) = self.states.get(self.current).and_then(|state| {
+                let change = state.change.clone().filter(|next| next.group == group)?;
+                Some((change, state.from?))
+            }) {
+                cursor = self.undo_one(change, buffer);
+                self.current = from;
             }
         }
-        // The step that was just undone is finished; the next edit starts a new one.
-        self.entry = None;
         Some(cursor)
     }
 
-    /// Undo one step, and remember it for a redo.
+    /// Undo one step against the buffer.
     fn undo_one(&mut self, change: Change, buffer: &mut Buffer) -> Cursor {
         let inserted = change.inserted.chars().count();
         buffer.replace_range(change.start, change.start + inserted, &change.removed);
-        let cursor = change.before;
-        self.future.push(change);
-        cursor
+        change.before
     }
 
     /// Redo the step that was undone last, against `buffer`.
     ///
-    /// `None` means there is nothing to redo.
+    /// `None` means there is nothing to redo. A state may have been made from
+    /// several others — the one that was undone, and one an edit made after it —
+    /// and redo takes the one made *last*, which is what makes `u` then an edit
+    /// then `<C-r>` continue the branch the person was on.
     pub(crate) fn redo(&mut self, buffer: &mut Buffer) -> Option<Cursor> {
-        let change = self.future.pop()?;
+        let child = self.newest_child(self.current)?;
+        let change = self.states[child].change.clone().expect("a child has one");
         let group = change.group;
+        let mut cursor = self.redo_one(change, buffer);
+        self.current = child;
         // Redo is the mirror of undo: the steps of a group go back in the order
         // they were made.
-        let mut cursor = self.redo_one(change, buffer);
         if group != 0 {
-            while self.future.last().is_some_and(|next| next.group == group) {
-                let next = self.future.pop().expect("just looked at it");
-                cursor = self.redo_one(next, buffer);
+            while let Some((next, change)) = self.newest_child(self.current).and_then(|next| {
+                let change = self.states[next]
+                    .change
+                    .clone()
+                    .filter(|change| change.group == group)?;
+                Some((next, change))
+            }) {
+                cursor = self.redo_one(change, buffer);
+                self.current = next;
             }
         }
-        self.entry = None;
         Some(cursor)
     }
 
-    /// Redo one step, and put it back where undo found it.
+    /// Redo one step against the buffer.
     fn redo_one(&mut self, change: Change, buffer: &mut Buffer) -> Cursor {
         let removed = change.removed.chars().count();
         buffer.replace_range(change.start, change.start + removed, &change.inserted);
-        let cursor = change.after;
-        self.past.push(change);
+        change.after
+    }
+
+    /// The state made from `parent` most recently, if any were.
+    fn newest_child(&self, parent: usize) -> Option<usize> {
+        self.states
+            .iter()
+            .enumerate()
+            .filter(|(_, state)| state.from == Some(parent))
+            .map(|(index, _)| index)
+            .next_back()
+    }
+
+    /// Go to the state at `target`, whatever branch it is on: `g-`, `g+`,
+    /// `:earlier` and `:later` are all this, with the target worked out by the
+    /// caller.
+    ///
+    /// The way there is the way a tree is walked: up from where the text is to
+    /// the deepest state the two have in common, and then down from there to the
+    /// target. States are crossed one at a time, so a group whose steps could not
+    /// fold is crossed in pieces — `u` is what takes such a group back whole.
+    pub(crate) fn goto(&mut self, target: usize, buffer: &mut Buffer) -> Option<Cursor> {
+        if target >= self.states.len() || target == self.current {
+            return None;
+        }
+        let mut down = Vec::new();
+        let mut at = Some(target);
+        while let Some(index) = at {
+            down.push(index);
+            if index == self.current {
+                break;
+            }
+            at = self.states[index].from;
+        }
+        // `down` ends at the deepest shared state. Everything after it is the
+        // way to the target, and the rest is the way back from where the text is.
+        let common = *down.last()?;
+        let mut cursor = None;
+        while self.current != common {
+            let state = &self.states[self.current];
+            let change = state.change.clone()?;
+            let from = state.from?;
+            cursor = Some(self.undo_one(change, buffer));
+            self.current = from;
+        }
+        for index in down.iter().rev().skip(1) {
+            let change = self.states[*index].change.clone()?;
+            cursor = Some(self.redo_one(change, buffer));
+            self.current = *index;
+        }
         cursor
+    }
+
+    /// The state `count` steps older in the order they were made, if there is
+    /// one: what `g-` goes to.
+    pub(crate) fn earlier(&self, count: usize) -> Option<usize> {
+        self.current.checked_sub(count).filter(|index| *index > 0)
+    }
+
+    /// The state `count` steps newer in the order they were made, if there is
+    /// one: what `g+` goes to.
+    pub(crate) fn later(&self, count: usize) -> Option<usize> {
+        let index = self.current + count;
+        (index < self.states.len()).then_some(index)
     }
 }
 
@@ -713,11 +873,15 @@ mod tests {
         }
         history.end_group(&mut buffer);
         assert_eq!(buffer.text(), "abc\n");
-        assert_eq!(history.past.len(), 1, "the group is one step");
+        assert_eq!(history.state_count() - 1, 1, "the group is one step");
 
         assert!(history.undo(&mut buffer).is_some());
-        assert_eq!(buffer.text(), "\n");
-        assert_eq!(history.past.len(), 0);
+        assert_eq!(buffer.text(), "\n", "and one `u` takes the group back");
+        assert_eq!(
+            history.state_count() - 1,
+            1,
+            "the state is still there: an undo moves, it does not throw away"
+        );
     }
 
     #[test]
@@ -737,8 +901,16 @@ mod tests {
         history.end_group(&mut buffer);
 
         assert_eq!(buffer.text(), "one\nhello\n");
-        assert_eq!(history.past.len(), 1, "the group is one step");
-        assert!(!history.past[0].removed.contains("host"), "sanity");
+        assert_eq!(history.state_count() - 1, 1, "the group is one step");
+        assert!(
+            !history.states[1]
+                .change
+                .as_ref()
+                .expect("a change")
+                .removed
+                .contains("host"),
+            "sanity"
+        );
         assert!(history.undo(&mut buffer).is_some());
         assert_eq!(buffer.text(), "one\n", "the whole group came back out");
         assert!(history.redo(&mut buffer).is_some());
@@ -761,7 +933,7 @@ mod tests {
         history.end_group(&mut buffer);
 
         assert_eq!(buffer.text(), "one 2 three\n");
-        assert_eq!(history.past.len(), 1);
+        assert_eq!(history.state_count() - 1, 1);
         assert!(history.undo(&mut buffer).is_some());
         assert_eq!(buffer.text(), "one two three\n", "the word is back");
     }
@@ -784,7 +956,7 @@ mod tests {
         }
         history.end_group(&mut buffer);
         assert_eq!(buffer.text(), "1aaa\n2bbb\n3\n", "all three went in");
-        assert_eq!(history.past.len(), 1, "one step, not three");
+        assert_eq!(history.state_count() - 1, 1, "one step, not three");
         assert!(history.undo(&mut buffer).is_some());
         assert_eq!(buffer.text(), "aaa\nbbb\n", "and one `u` takes it all back");
     }
@@ -805,7 +977,7 @@ mod tests {
         }
         history.end_group(&mut buffer);
         assert_eq!(buffer.text(), "Ybc\n");
-        assert_eq!(history.past.len(), 1, "one step, overlapping or not");
+        assert_eq!(history.state_count() - 1, 1, "one step, overlapping or not");
         assert!(history.undo(&mut buffer).is_some());
         assert_eq!(buffer.text(), "abc\n", "and one `u` takes the group back");
         assert!(history.redo(&mut buffer).is_some());
@@ -867,22 +1039,32 @@ mod tests {
     }
 
     #[test]
-    fn a_new_step_drops_what_was_undone() {
+    fn a_new_step_keeps_what_was_undone() {
+        // The old linear history threw the undone step away the moment an edit
+        // was made after it. The tree keeps it: the edit starts a new branch, and
+        // `g-` walks the states in the order they were made, which is how a
+        // person gets back to what they undid.
         let mut buffer = Buffer::from_text("abc\n");
         let mut history = recorded(&mut buffer, 0, 1, "x");
         assert_eq!(buffer.text(), "xbc\n");
         assert!(history.undo(&mut buffer).is_some());
         assert_eq!(buffer.text(), "abc\n");
 
-        // Recording a new step makes the undone one unreachable.
         let change = Change::planned(&buffer, 0, 0, "z", Cursor::default());
         buffer.replace_range(0, 0, "z");
         history.push(change.settled(Cursor::default()));
+        assert_eq!(buffer.text(), "zabc\n");
         assert!(
             history.redo(&mut buffer).is_none(),
-            "the undone step is gone for good"
+            "there is nothing *after* this state: the edit started a branch"
         );
-        assert_eq!(buffer.text(), "zabc\n", "and redo left the text alone");
+        assert_eq!(buffer.text(), "zabc\n", "so redo left the text alone");
+
+        // The state that was undone is one step back in the order they were
+        // made, and `g-` goes there.
+        let earlier = history.earlier(1).expect("the state that was undone");
+        assert!(history.goto(earlier, &mut buffer).is_some());
+        assert_eq!(buffer.text(), "xbc\n", "the branch is still reachable");
     }
 
     #[test]

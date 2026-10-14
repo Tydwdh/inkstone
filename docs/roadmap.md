@@ -2880,6 +2880,44 @@ spellings.
   `**;stop` — the manual's other two kinds of file searching — and `'path'` for
   `:find`, which this editor does not have.
 
+## Done — the undo tree
+
+The largest remaining *behavioural* gap in the kernel: undoing and then editing
+again used to throw the undone branch away, which is the one thing an undo a
+person relies on should never do.
+
+- **What shipped:** `History` keeps a *tree* rather than a stack. A state is a
+  change, the state it was made from, and an identity; undo walks to the parent,
+  redo to the newest state made from the one the text is in, and `goto` walks the
+  way a tree is walked — up to the deepest state the two have in common, then
+  down. On top of that: `g-`/`g+` with counts, `:earlier {count}`/`:later
+  {count}`, and `:undolist`, which names the leaves with how deep and how old
+  each is.
+- **Constraints it had to respect, and how:** the folds are not text, so they are
+  not in the history — they are kept beside it, one entry per *state*, and the
+  entry for a state is written by the edit that leaves it. That was the one place
+  the change needed care: the old code wrote the entry *before* the history had
+  the state (`fold_states[steps + 1]`), and with a tree the index is only known
+  after the push, so the recording moved to after it. Two entries per edit and a
+  truncate became one write per state and no truncate at all: a state an undo
+  left behind is still reachable by `g-`, so its folds have to be too.
+- **What the tests said:** the two history tests that pinned the old behaviour
+  were rewritten to pin the new one — "the state is still there: an undo moves,
+  it does not throw away" — and the one that asserted a new step *drops* what was
+  undone became `a_new_step_keeps_what_was_undone`, which walks the branch with
+  `g-` at the end. At the editor level, one test does the whole story: `x`, `u`,
+  `dd`, and then `g-` gets back to the state the `x` left.
+- **What the smoke showed:** the same story in a terminal, three frames of it —
+  `2 leaves   1 changes 3 seconds ago   1 changes 2 seconds ago` is a tree with
+  two branches you can walk between.
+- **Files:** `inkstone-core` (`history.rs`'s `State`, `push`/`undo`/`redo`/`goto`/
+  `earlier`/`later`/`leaves`/`depth_of`, the editor's `goto_older`/`goto_newer`/
+  `goto_state`/`undo_list_text`, the `g-`/`g+` keys and the `:` names,
+  `record_fold_state`/`restore_folds`).
+- **Left for later:** the time units (`:earlier 10s`, `:later 1h`), `{N}f` for
+  file writes, `:undo {number}` — which needs `:undolist` to show numbers a
+  person can type — and `'undolevels'`, since nothing here ever prunes the tree.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

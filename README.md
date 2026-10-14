@@ -177,6 +177,8 @@ notation;
 | n | `g ~` | `toggle_case_motion` |
 | n | `g u` | `lower_motion` |
 | n | `g U` | `upper_motion` |
+| n | `g -` | `undo_earlier` |
+| n | `g +` | `undo_later` |
 | n | `%` | `match_bracket` |
 | n | `<C-a>` | `increment` |
 | n | `<C-x>` | `decrement` |
@@ -298,6 +300,15 @@ or one command — one `dd`, one `x`. A command whose edits cannot be said as on
 replacement (a block insert types on every row of a rectangle) is still one step:
 its steps are undone together, in the reverse of the order they were made. Undoing restores the
 cursor as well as the text.
+
+The history is vim's *undo tree*, not a stack: undoing and then editing again
+does not throw the undone branch away. `u` and `<C-r>` walk the branch the text
+is on, while `g-` and `g+` (with a count: `3g-`) walk the states in the order
+they were *made*, whichever branch they are on — which is how you get back to
+what you undid. `:earlier {count}` and `:later {count}` are the same two from the
+`:` line, and `:undolist` names the leaves of the tree, each with how deep it is
+and how long ago it was made. Vim's time forms (`:earlier 10s`, `1f`) are not
+implemented.
 
 Writing the file clears the modified flag, not the history: `:q` after a `u`
 still refuses until you write again. Reopening a file (`:e`) starts a fresh

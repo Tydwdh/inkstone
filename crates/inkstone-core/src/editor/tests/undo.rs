@@ -307,3 +307,54 @@ fn undo_walks_all_the_way_back_and_redo_walks_forward_again() {
     while ed.redo() {}
     assert_eq!(ed.buffer.text(), edited, "and forward to the end");
 }
+
+#[test]
+fn an_edit_after_an_undo_keeps_the_branch() {
+    // The point of the tree: what was undone is not thrown away by the next
+    // edit. `u` walks the branch the text is on; `g-` walks the order the states
+    // were made in, which is how a person gets back to it.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\ntwo\n");
+    feed(&mut ed, "x");
+    assert_eq!(ed.buffer.text(), "ne\ntwo\n");
+    feed(&mut ed, "u");
+    assert_eq!(ed.buffer.text(), "one\ntwo\n");
+
+    // A different edit: this is a *new* branch, and redo has nothing after it.
+    feed(&mut ed, "dd");
+    assert_eq!(ed.buffer.text(), "two\n");
+    assert!(!ed.redo(), "nothing was made after this state");
+
+    // `g-` goes one state back in the order they were made, which is the undone
+    // one — not the state this branch came from.
+    feed(&mut ed, "g-");
+    assert_eq!(ed.buffer.text(), "ne\ntwo\n", "the branch is still there");
+    feed(&mut ed, "g+");
+    assert_eq!(ed.buffer.text(), "two\n", "and forward again");
+    // `u` is the branch, not time: it takes the `dd` back.
+    feed(&mut ed, "u");
+    assert_eq!(ed.buffer.text(), "one\ntwo\n");
+
+    // The count repeats, and the ends say so rather than guessing.
+    feed(&mut ed, "g-");
+    assert_eq!(ed.buffer.text(), "one\ntwo\n", "the state before the `x`");
+    feed(&mut ed, "3g-");
+    assert_eq!(ed.message, "E831: Cannot go back that far");
+    feed(&mut ed, ":later 5<Enter>");
+    assert_eq!(ed.message, "E831: Cannot go forward that far");
+}
+
+#[test]
+fn undolist_names_the_leaves_of_the_tree() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\ntwo\n");
+    feed(&mut ed, "x");
+    feed(&mut ed, "u");
+    feed(&mut ed, "dd");
+    feed(&mut ed, ":undolist<Enter>");
+    assert!(ed.message.starts_with("2 leaves"), "{}", ed.message);
+    assert!(ed.message.contains("1 changes"), "{}", ed.message);
+    // The two leaves are the `x` branch and the `dd` one — the state the undo
+    // went back to is not a leaf, since something was made from it.
+    assert!(ed.message.matches("changes").count() == 2, "{}", ed.message);
+}

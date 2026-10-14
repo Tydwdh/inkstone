@@ -380,30 +380,27 @@ impl Editor {
     ///
     /// `fold_states[i]` is the state *after* `i` steps, so the stack reads the way the
     /// history does: whatever `steps` the history lands on, the entry at that index is
-    /// the folds that belong to it. Each edit writes two entries — the state it found
-    /// and the state it leaves — and the truncate drops the ones an undone step can no
-    /// longer reach.
+    /// the folds that belong to it.
+    ///
+    /// One entry per *state*, written whenever an edit leaves the text in a state
+    /// — and an entry is never thrown away, because a state an undo left behind
+    /// is still reachable: `g-` and `g+` walk the states in the order they were
+    /// made, whichever branch they are on.
     pub(super) fn record_fold_state(&mut self) {
-        let steps = self.history.steps();
-        self.fold_states.truncate(steps);
-        self.fold_states.push(self.folds.clone());
+        let at = self.history.state_index();
+        if self.fold_states.len() <= at {
+            self.fold_states.resize(at + 1, Vec::new());
+        }
+        self.fold_states[at] = self.folds.clone();
     }
 
-    /// Put the folds back to what they were at the step the history has landed on.
+    /// Put the folds back to what they were in the state the history is in.
     ///
-    /// Every entry is written by the *edit* that follows it — `fold_states[i]` is the
-    /// folds before step `i + 1`, which is also the state step `i` left — so an undo
-    /// and a redo have nothing to write: they only have to read the entry for the step
-    /// they land on. What they must *not* do is leave entries for steps that can no
-    /// longer be reached, which is what the truncate is for.
+    /// An undo and a redo have nothing to write: the entry for a state is written
+    /// by the edit that leaves it, so all they do is read the one for the state
+    /// they land on.
     pub(super) fn restore_folds(&mut self) {
-        let steps = self.history.steps();
-        // One step *ahead* is kept as well: a redo goes there, and the entry for it is
-        // the state the step being undone left. An edit made after an undo drops it
-        // again — its own truncate is `steps + 1` — which is what keeps an undone step
-        // from being redone to a stale fold.
-        self.fold_states.truncate(steps + 2);
-        if let Some(folds) = self.fold_states.get(steps).cloned() {
+        if let Some(folds) = self.fold_states.get(self.history.state_index()).cloned() {
             self.folds = folds;
         }
     }

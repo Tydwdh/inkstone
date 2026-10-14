@@ -7,6 +7,15 @@ use super::*;
 
 impl Editor {
     pub(super) fn handle_command_line(&mut self, key: KeyMsg) {
+        // `'cedit'`: the key that opens the command-line window from here, with
+        // "the command as typed so far" as its last line. Only the first key of
+        // the setting is used, which is what vim does too.
+        if self.cedit_matches(&key) {
+            let searches = self.prompt.direction().is_some();
+            let draft = self.cmdline.clone();
+            self.open_command_line_window(searches, &draft);
+            return;
+        }
         match key.code {
             KeyCode::Esc => {
                 // A cancelled search leaves the cursor where it started and puts
@@ -233,6 +242,38 @@ impl Editor {
     pub(super) fn goto_match(&mut self, start: usize) {
         self.cursor.set_char_idx(&self.buffer, start);
         self.after_edit();
+    }
+
+    /// Whether a key is the one `'cedit'` names.
+    ///
+    /// The setting is written the way every other key in this editor is — `<C-f>`,
+    /// `<Up>` — and a caret before a letter is the other spelling vim allows
+    /// (`^F` is CTRL-F).
+    fn cedit_matches(&self, key: &KeyMsg) -> bool {
+        let setting = self.options.borrow().cedit.clone();
+        let mut text = setting.trim().to_string();
+        if let Some(letter) = text.strip_prefix('^') {
+            if letter.chars().count() == 1 {
+                // `^F` and `^f` are the same key, which is why the letter is
+                // lowered: a terminal has one CTRL-F, not two.
+                text = format!("<C-{}>", letter.to_ascii_lowercase());
+            }
+        }
+        let Ok(keys) = crate::keymap::parse_key(&text) else {
+            return false;
+        };
+        match keys.first() {
+            // A modified character is the same key whatever its case: `<C-Y>` in
+            // a setting and `<C-y>` from a terminal are one key press.
+            Some(KeyMsg {
+                code: KeyCode::Char(wanted),
+                mods,
+            }) if mods.contains(&inkstone_rpc::Mod::Ctrl) => {
+                matches!(key.code, KeyCode::Char(c) if c.to_ascii_lowercase() == *wanted)
+                    && key.is_ctrl()
+            }
+            other => other == Some(key),
+        }
     }
 
     /// Whether a search for `pattern` ignores case: `'ignorecase'`, unless

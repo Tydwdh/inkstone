@@ -221,6 +221,9 @@ settings! {
     /// what `#` is for in C — a preprocessor line is not indented like the code
     /// inside it. Empty by default, as in vim.
     FoldIgnore as foldignore: String = String::new(),
+    /// The key that opens the command-line window from the command line —
+    /// `'cedit'`, `<C-f>` by default, which is vim's own.
+    Cedit as cedit: String = String::from("<C-f>"),
     /// How many screen lines the command-line window uses — `q:` and `q/`.
     CmdWinHeight as cmdwinheight: Count = Count(7),
     /// Suffixes tried when `gf` does not find the name it was given, as a

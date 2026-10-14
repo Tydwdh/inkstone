@@ -239,6 +239,17 @@ fn the_history_window_can_be_edited() {
     assert_eq!(ed.list, None, "the window went away");
     assert_eq!(ed.mode, Mode::Normal);
 
+    // `<CR>` in *normal* mode is the same thing, and it is `open_place` — the
+    // command the window's own list of refusals must not contain. The insert-mode
+    // case above would not have caught that.
+    feed(&mut ed, ":set number<Enter>");
+    feed(&mut ed, "q");
+    feed(&mut ed, ":");
+    ed.cursor = Cursor::new(0, 0);
+    feed(&mut ed, "<Enter>");
+    assert_eq!(ed.list, None, "`<CR>` runs the line and closes the window");
+    assert_eq!(ed.mode, Mode::Normal);
+
     // A settings list is a report, and stays read-only.
     ed.execute_cmdline("set all");
     assert_eq!(ed.list, Some(List::Settings));
@@ -312,4 +323,39 @@ fn the_command_line_window_refuses_what_would_leave_it() {
     feed(&mut ed, ":q<Enter>");
     assert_eq!(ed.list, None, "the window closed");
     assert_eq!(ed.windows.len(), 1);
+}
+
+#[test]
+fn cedit_opens_the_window_with_the_line_being_typed() {
+    // "The key used in Command-line Mode to open the command-line window … The
+    // last line contains the command as typed so far."
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\n");
+    ed.viewport = crate::screen::Viewport::new(40, 12);
+    feed(&mut ed, ":set number<Enter>");
+
+    // Half-typed, then the key `'cedit'` names.
+    feed(&mut ed, ":set tabstop=2");
+    feed(&mut ed, "<C-f>");
+    assert_eq!(ed.list, Some(List::Commands), "the window opened");
+    assert_eq!(ed.mode, Mode::Normal, "the prompt is done with");
+    assert!(
+        ed.buffer.text().ends_with("set tabstop=2\n"),
+        "the line being typed is the last one: {}",
+        ed.buffer.text()
+    );
+    assert_eq!(ed.windows.len(), 2);
+
+    // Running it runs what was typed — the point of opening the window there.
+    ed.cursor = Cursor::new(1, 0);
+    feed(&mut ed, "<Enter>");
+    assert_eq!(ed.list, None, "the window closed");
+    feed(&mut ed, ":set tabstop?<Enter>");
+    assert_eq!(ed.message, "tabstop=2", "the half-typed line ran");
+
+    // The setting is a key like any other, and vim's caret spelling works too.
+    ed.execute_cmdline("set cedit=^Y");
+    feed(&mut ed, ":set number");
+    feed(&mut ed, "<C-y>");
+    assert_eq!(ed.list, Some(List::Commands));
 }

@@ -412,7 +412,9 @@ what the command did is not half a screen down, and an edit that is not run goes
 it. `'cmdwinheight'` says how tall the window is, there is no nesting — `q:` inside one
 says `E1292: Command-line window is already open` — and `<C-c>` puts the line under
 the cursor back on the command line to keep typing, with the window still there.
-Nothing that would leave it works while it is up — `:e`, `:sp`, `:tabnew`, `:bn`
+`'cedit'` (CTRL-F, vim's default) opens the same window from the command line, with
+the line being typed as its last line, so a long command can be written in a real
+window. Nothing that would leave it works while it is up — `:e`, `:sp`, `:tabnew`, `:bn`
 and the rest say `E11: Invalid in command-line window; :q<CR> closes the window` —
 and `:q` throws the window away without asking, because what was edited there is
 discarded by design. A command run from a script is not

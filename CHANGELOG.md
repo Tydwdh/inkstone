@@ -26,6 +26,10 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `'cedit'` (CTRL-F, vim's default): the key that opens the command-line window
+  from the command line, with "the command as typed so far" as its last line. Both
+  of vim's spellings work — `<C-f>` and the caret form `^F` — and a modified letter
+  is the same key whatever its case, since a terminal has one CTRL-F.
 - The `q:` and `q/` windows can be *edited* — vim's command-line window, "you can
   now use commands to move around and edit the text in the window" — and `<CR>`
   runs the line under the cursor in insert mode as well as in normal mode, which

@@ -3096,7 +3096,32 @@ means.
   line and then changed their mind.
 - **Files:** `inkstone-core` (`moves_window_or_buffer`, the guard in `run_command`,
   `quit`'s history-window arm).
-- **Left for later:** `'cedit'`.
+- **Left for later:** `'cedit'` shipped in the entry above this one, so the
+  manual's section on the command-line window is now all here.
+
+## Done — `'cedit'`, and the section is closed
+
+The last piece of the manual's command-line window section: opening it from the
+command line.
+
+- **What shipped:** `'cedit'`, CTRL-F by default, opens the command-line window
+  from Command-line mode with "the command as typed so far" as its last line —
+  which is what it is for: a long command written in a real window instead of on a
+  line. Both of vim's spellings work, `<C-f>` and the caret form `^F`, and a
+  modified letter is the same key whatever its case, because a terminal has one
+  CTRL-F and not two.
+- **What the work found, which is the reason this entry exists:** the `E11` list
+  written in the entry below had `open_place` in it — and `open_place` *is* `<CR>`,
+  the key the window is used with. The insert-mode `<CR>` test did not catch it
+  because that path goes through `handle_insert`; the cedit test's normal-mode
+  `<CR>` did, and the probe named it. There is a regression test for the
+  normal-mode `<CR>` now, and a comment in the list saying what must not be in it.
+- **Files:** `inkstone-core` (`'cedit'`, `cedit_matches`, the `<C-f>` arm in
+  `handle_command_line`, `open_command_line_window`'s draft line, the regression
+  test).
+- **Left for later:** nothing in this section. The window's own list of refusals
+  is a *list* rather than a flag on each command, so a new command that moves
+  windows has to be added to it — that is the one thing to keep in step.
 
 ## Next, roughly in order
 

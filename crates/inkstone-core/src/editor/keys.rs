@@ -973,7 +973,8 @@ impl Editor {
 fn moves_window_or_buffer(name: &str) -> bool {
     matches!(
         name,
-        // Another file in this window.
+        // Another file in this window. `open_place` is *not* here: it is what
+        // `<CR>` runs, and `<CR>` is how the window is used.
         "edit_file"
             | "edit_file_force"
             | "buffer_go"
@@ -983,7 +984,6 @@ fn moves_window_or_buffer(name: &str) -> bool {
             | "buffer_next_force"
             | "buffer_previous_force"
             | "buffer_delete_force"
-            | "open_place"
             // Another window, or a change to this one's place on the screen.
             | "split_rows"
             | "split_columns"

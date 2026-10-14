@@ -175,6 +175,15 @@ impl Editor {
     /// the cursor is on: a command history is a list of things to *do again*,
     /// which is what makes it a list rather than a message.
     pub(crate) fn open_history_window(&mut self, searches: bool) {
+        self.open_command_line_window(searches, "");
+    }
+
+    /// The same, with the line being typed as the last line of the window.
+    ///
+    /// "When the window opens it is filled with the command-line history. The last
+    /// line contains the command as typed so far" — which is what `'cedit'` opens
+    /// the window for.
+    pub(crate) fn open_command_line_window(&mut self, searches: bool, draft: &str) {
         // "Once a command-line window is open it is not possible to open another
         // one": there is no nesting, which vim says with `E1292`.
         if self.history_window().is_some() {
@@ -194,8 +203,12 @@ impl Editor {
             };
             return;
         }
-        let count = history.len();
-        let text: String = history.iter().map(|line| format!("{line}\n")).collect();
+        let count = history.len() + usize::from(!draft.is_empty());
+        let mut text: String = history.iter().map(|line| format!("{line}\n")).collect();
+        if !draft.is_empty() {
+            text.push_str(draft);
+            text.push('\n');
+        }
         let mut document = Document::new(Buffer::from_text(&text), Language::Plain);
         document.list = Some(if searches {
             List::Searches
@@ -222,6 +235,14 @@ impl Editor {
             .max(2)
             .min(u16::MAX as usize) as u16;
         self.resize_window(Axis::Rows, Resize::Set(height - 1));
+        // The prompt is done with: the window is a window now, and the line that
+        // was being typed is the last line in it.
+        if !draft.is_empty() {
+            self.mode = Mode::Normal;
+            self.cmdline.clear();
+            self.cmdline_cursor = 0;
+            self.forget_recall();
+        }
         self.message = format!("{count} command{}", if count == 1 { "" } else { "s" });
     }
 

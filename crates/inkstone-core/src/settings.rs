@@ -207,6 +207,10 @@ settings! {
     /// drawn as one line even when it is not closed itself. `zm` lowers it and `zr`
     /// raises it, and zero — vim's default — means the folds are shown as they are.
     FoldLevel as foldlevel: Count = Count(0),
+    /// How many lines a fold has to be to be *displayed* closed. One, the default
+    /// vim has, means a fold needs two lines: a fold of one line hides nothing,
+    /// so closing it does nothing a person can see.
+    FoldMinLines as foldminlines: Count = Count(1),
     /// How deep folds may nest with `'foldmethod'` set to `indent`: a fold deeper
     /// than this is not made. Vim's default is twenty.
     FoldNestMax as foldnestmax: usize = 20,

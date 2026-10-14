@@ -372,7 +372,11 @@ replaces in every line of the fold, which is vim's own example. Folds hold *line
 the editor keeps them up to date as lines are added and taken away, so a fold stays on
 the text it was put on. `'foldmethod'` is `manual` — folds you make with `zf`
 are what there is — or `indent`, which works them out from the indentation and
-again on `zx`.
+again on `zx`. `'foldminlines'` says how many lines a fold has to be to be
+*displayed* closed (one, vim's default, means two lines), and `'foldlevel'`,
+`'foldnestmax'` and `'foldignore'` are the rest of the family. `'foldtext'` is
+not implemented: vim evaluates an expression for each drawn fold line, and this
+editor will not run a script per line per frame.
 
 `q{register}` records what you type into a register, `q` stops the recording, and
 `@{register}` plays it back — through the same state machine every key goes through,
@@ -687,7 +691,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` (an integer), `foldnestmax` (an integer) and `foldignore` (characters) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` and `foldminlines` (integers), `foldnestmax` (an integer) and `foldignore` (characters) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

@@ -563,3 +563,45 @@ fn a_closed_fold_is_drawn_as_one_line() {
         "the top snapped out"
     );
 }
+
+#[test]
+fn a_fold_too_small_to_be_shut_is_drawn_open() {
+    // `'foldminlines'`: "the number of screen lines above which a fold can be
+    // displayed closed … With the default value of one a fold can only be closed
+    // if it takes up two or more screen lines." A fold of one line hides nothing
+    // and is never made here, so the smallest fold there is takes two.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\ntwo\nthree\n");
+    ed.viewport = crate::screen::Viewport::new(40, 8);
+    ed.cursor.row = 0;
+    // `zfj` folds the cursor's line with the one below it.
+    feed(&mut ed, "zfj");
+    assert!(ed.folds[0].closed, "closed by hand");
+    assert!(ed.fold_is_shut(0), "two lines is more than the default one");
+    assert_eq!(
+        ed.visible_lines(0, 4),
+        vec![0, 2],
+        "so the line inside hides"
+    );
+
+    // Raising the setting past the fold's size draws it open — the fold is still
+    // closed, and `zo` still opens it, which is why "displayed" is the word the
+    // manual uses.
+    ed.execute_cmdline("set foldminlines=2");
+    assert!(!ed.fold_is_shut(0), "two is not *above* two");
+    assert_eq!(ed.visible_lines(0, 4), vec![0, 1, 2], "both lines show");
+    assert!(ed.folds[0].closed, "and the fold is still closed");
+    feed(&mut ed, "zo");
+    assert!(!ed.folds[0].closed, "opened");
+    feed(&mut ed, "zc");
+    assert!(ed.folds[0].closed, "and closed again");
+
+    // Three lines and `foldminlines=2`: above it, so shut.
+    ed.execute_cmdline("set foldminlines=2");
+    ed.buffer = Buffer::from_text("one\ntwo\nthree\nfour\n");
+    ed.cursor.row = 0;
+    ed.folds.clear();
+    feed(&mut ed, "zf2j");
+    assert!(ed.fold_is_shut(0), "three lines is above two");
+    assert_eq!(ed.visible_lines(0, 4), vec![0, 3]);
+}

@@ -50,6 +50,8 @@ pub struct View<'a> {
     /// move. A fold nested deeper than it is drawn shut even when it is not closed
     /// by hand.
     pub(crate) foldlevel: usize,
+    /// How many lines a fold has to be to be drawn closed — `'foldminlines'`.
+    pub(crate) foldminlines: usize,
     /// Every search match in the document, in order. The ones on screen are
     /// highlighted.
     pub matches: &'a [(usize, usize)],
@@ -128,6 +130,8 @@ struct Pane<'a> {
     folds: &'a [crate::editor::Fold],
     /// And how deep they are shown closed.
     foldlevel: usize,
+    /// And how many lines a fold needs to be drawn closed.
+    foldminlines: usize,
     cursor: Cursor,
     top_line: usize,
     left_col: usize,
@@ -208,6 +212,7 @@ fn panes<'a>(view: &'a View<'a>) -> Vec<Pane<'a>> {
             block: None,
             folds: &window.folds,
             foldlevel: view.foldlevel,
+            foldminlines: view.foldminlines,
             cursor: window.cursor,
             top_line: window.top_line,
             left_col: window.left_col,
@@ -238,6 +243,7 @@ fn live_pane<'a>(view: &'a View<'a>, rect: crate::editor::Rect) -> Pane<'a> {
         block: view.block,
         folds: view.folds,
         foldlevel: view.foldlevel,
+        foldminlines: view.foldminlines,
         cursor: view.cursor,
         top_line: view.viewport.top_line,
         left_col: view.viewport.left_col,
@@ -903,7 +909,7 @@ fn visible_lines(pane: &Pane<'_>, rows: usize) -> Vec<usize> {
 fn closed_fold_at(pane: &Pane<'_>, line: usize) -> Option<crate::editor::Fold> {
     (0..pane.folds.len())
         .find(|index| {
-            crate::editor::fold_is_shut(pane.folds, pane.foldlevel, *index)
+            crate::editor::fold_is_shut(pane.folds, pane.foldlevel, pane.foldminlines, *index)
                 && pane.folds[*index].start == line
         })
         .map(|index| pane.folds[index])
@@ -915,8 +921,14 @@ fn closed_fold_at(pane: &Pane<'_>, line: usize) -> Option<crate::editor::Fold> {
 /// Vim lets this be replaced by a function (`'foldtext'`); this is the shape of
 /// vim's default, and the roadmap has the option.
 fn fold_text(pane: &Pane<'_>, line: usize, fold: crate::editor::Fold) -> String {
+    // What is *hidden* is the count worth saying: a fold of two lines hides one
+    // of them, and "+--  1 line" is what that is.
     let hidden = fold.end - fold.start;
-    format!("+--  {hidden} lines: {}", pane.buffer.line_string(line))
+    format!(
+        "+--  {hidden} line{}: {}",
+        if hidden == 1 { "" } else { "s" },
+        pane.buffer.line_string(line)
+    )
 }
 
 /// The character columns of buffer line `line_no` that the visual selection
@@ -1034,6 +1046,7 @@ mod tests {
         block: Option<(usize, usize, usize, Option<usize>)>,
         folds: Vec<crate::editor::Fold>,
         foldlevel: usize,
+        foldminlines: usize,
         matches: Vec<(usize, usize)>,
         current_match: Option<(usize, usize)>,
         incsearch: bool,
@@ -1056,6 +1069,7 @@ mod tests {
                 block: None,
                 folds: Vec::new(),
                 foldlevel: 0,
+                foldminlines: 1,
                 matches: Vec::new(),
                 current_match: None,
                 incsearch: false,
@@ -1078,6 +1092,7 @@ mod tests {
                 block: self.block,
                 folds: &self.folds,
                 foldlevel: self.foldlevel,
+                foldminlines: self.foldminlines,
                 matches: &self.matches,
                 current_match: self.current_match,
                 incsearch: self.incsearch,
@@ -1485,6 +1500,30 @@ mod tests {
             ATTR_BOLD,
             "and it is the current one"
         );
+    }
+
+    #[test]
+    fn a_fold_minlines_keeps_its_lines_on_screen() {
+        // `'foldminlines'` is a drawing rule, so this is where it has to be
+        // proved: the same fold, drawn shut and then drawn open.
+        let mut case = Case::new("one\ntwo\nthree\n", 20, 8);
+        case.folds = vec![crate::editor::Fold {
+            start: 0,
+            end: 1,
+            closed: true,
+        }];
+        let out = case.compose();
+        assert_eq!(row(&out, 0), "+--  1 line: one", "shut: the marker");
+        assert_eq!(row(&out, 1), "three", "and the line after it");
+
+        // Two lines is not *above* two, so the fold is drawn open — and the fold
+        // is still closed, which the last test in `folds.rs` checks in the
+        // kernel.
+        case.foldminlines = 2;
+        let out = case.compose();
+        assert_eq!(row(&out, 0), "one", "open: the first line");
+        assert_eq!(row(&out, 1), "two", "and the one it would have hidden");
+        assert_eq!(row(&out, 2), "three");
     }
 
     #[test]

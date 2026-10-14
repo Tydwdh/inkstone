@@ -446,7 +446,12 @@ impl Window {
 /// rule must be the same in both: the drawing asks it per line, and the kernel asks it
 /// for `zo`, `zc` and the cursor. The first version of this had the rule in the kernel
 /// and a stale copy in the renderer, and the smoke showed a level that closed nothing.
-pub(crate) fn fold_is_shut(folds: &[Fold], foldlevel: usize, index: usize) -> bool {
+pub(crate) fn fold_is_shut(
+    folds: &[Fold],
+    foldlevel: usize,
+    minlines: usize,
+    index: usize,
+) -> bool {
     let Some(fold) = folds.get(index) else {
         return false;
     };
@@ -455,7 +460,14 @@ pub(crate) fn fold_is_shut(folds: &[Fold], foldlevel: usize, index: usize) -> bo
         .filter(|other| other.start < fold.start && other.end >= fold.end)
         .count()
         + 1;
-    fold.closed || depth > foldlevel
+    // `'foldminlines'`: "the number of screen lines above which a fold can be
+    // displayed closed … With the default value of one a fold can only be closed
+    // if it takes up two or more screen lines. Set to zero to be able to close
+    // folds of just one screen line." It is about the *display*: the fold is
+    // still closed, and `zo` still opens it — it is simply drawn open, which is
+    // why this is the one place the rule lives rather than two.
+    let lines = fold.end - fold.start + 1;
+    (fold.closed || depth > foldlevel) && lines > minlines
 }
 
 /// A fold: a range of lines that can be drawn as its first one.

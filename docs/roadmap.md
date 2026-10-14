@@ -2768,6 +2768,39 @@ needed to be usable on a real project.
   is what a local question answers, and `ed.set` from a script writing the global
   value rather than only the one in force.
 
+## Done — `'foldminlines'`, and the fold family is complete
+
+The last of the fold settings, and the one whose rule has to be read rather than
+guessed.
+
+- **What shipped:** `'foldminlines'` — "the number of screen lines above which a
+  fold can be displayed closed … With the default value of one a fold can only be
+  closed if it takes up two or more screen lines" — so a fold of N lines is drawn
+  shut when `N > foldminlines`. `'manual'` and `'indent'` folding, `'foldlevel'`,
+  `'foldnestmax'`, `'foldignore'`, `:mkview`/`:loadview`, and the manual's whole
+  "Behavior of folds" section were already in; this was the rest.
+- **Constraints it had to respect, and how:** the manual says it "only has an
+  effect on what is displayed" — the fold stays closed — so the rule went into
+  `fold_is_shut`, the one free function the drawing *and* the kernel share.
+  That is deliberate: the first version of folds had the rule twice, the renderer
+  went stale, and a smoke test caught a level that closed nothing. A fold drawn
+  open is a fold whose lines are on screen, so the motions, the drawing and the
+  cursor have to agree about it, and one function is what makes them.
+- **What a test could not check, and a smoke could:** that the setting reaches the
+  *screen*. `:set foldminlines=2` over a two-line fold shows both of its lines in
+  the terminal, and setting it back folds them again — which is the whole feature
+  in two frames.
+- **Two things the work found:** a fold of one line is never *made* here (a fold
+  that hides nothing is dropped), so vim's `foldminlines=0` case has nothing to
+  act on and the smallest fold there is takes two lines; and the fold marker said
+  `1 lines`, since the count is of the lines *hidden* and the plural only fitted
+  the rest.
+- **Files:** `inkstone-core` (`settings.rs`, `fold_is_shut`'s new parameter, the
+  `View`'s `foldminlines`, and `fold_text`'s plural).
+- **Left for later:** `'foldtext'` — vim evaluates an expression per drawn fold
+  line, and this editor will not run a script per line per frame; a format string
+  would be new syntax, so it wants a design note first.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

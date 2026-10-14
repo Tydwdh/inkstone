@@ -26,6 +26,14 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `'foldminlines'`, the last setting of the fold family: a fold is *displayed*
+  closed only when it is longer than that many lines, so a two-line fold shows
+  both of its lines with `:set foldminlines=2`. The fold itself is still closed —
+  `zo` opens it, and a later `zc` closes it again — which is why the manual says
+  the setting "only has an effect on what is displayed".
+- A fold's marker says `+--  1 line: one` for a fold that hides one line: it
+  said `1 lines`, because the count is of what is hidden and the plural was only
+  ever right for the smaller half of the cases.
 - `:setlocal` and `:setglobal`, the manual's own table: `:set {name}={value}`
   writes the value in force *and* the one every other file gets, `:setlocal` only
   the file that is open, and `:setglobal` only the value outside every file. A

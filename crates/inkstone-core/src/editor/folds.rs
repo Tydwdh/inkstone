@@ -509,7 +509,13 @@ impl Editor {
     /// Whether a fold is *drawn* closed: either it was closed, or it is nested
     /// deeper than `'foldlevel'` — which is what `zm` and `zr` move.
     pub(crate) fn fold_is_shut(&self, index: usize) -> bool {
-        fold_is_shut(&self.folds, self.options.borrow().foldlevel.0, index)
+        let options = self.options.borrow();
+        fold_is_shut(
+            &self.folds,
+            options.foldlevel.0,
+            options.foldminlines.0,
+            index,
+        )
     }
 
     /// `zm` — show one level fewer; `zr` — one more.

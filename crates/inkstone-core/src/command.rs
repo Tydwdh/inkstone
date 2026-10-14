@@ -3856,8 +3856,27 @@ fn goto_file_at(editor: &mut Editor, count: usize, line: Option<usize>) -> Resul
     // `file-searching`. The name itself is taken literally, because `isfname`
     // has no `*` in it: the pattern is the directory's, not the file's.
     let entries = editor.options.borrow().path.0.clone();
+    let suffixes: Vec<String> = editor
+        .options
+        .borrow()
+        .suffixesadd
+        .split(',')
+        .map(str::trim)
+        .filter(|suffix| !suffix.is_empty())
+        .map(str::to_string)
+        .collect();
     for dir in entries.iter() {
         candidates.extend(path_candidates(dir, &name));
+    }
+    // `'suffixesadd'`: "used when searching for a file for the "gf" … commands …
+    // to check for file names with a suffix added". The plain name is looked for
+    // over every entry first — what a person wrote should win over what a setting
+    // guessed — and then each suffix the same way. Vim nests it the other way
+    // round (each entry, then each suffix); with one entry, the two are the same.
+    for suffix in &suffixes {
+        for dir in entries.iter() {
+            candidates.extend(path_candidates(dir, &format!("{name}{suffix}")));
+        }
     }
     let Some(path) = candidates
         .into_iter()

@@ -541,3 +541,46 @@ fn a_path_entry_can_search_upwards() {
     feed(&mut ed, "gf");
     assert_eq!(ed.message, "E484: Can't open file shared.h");
 }
+
+#[test]
+fn a_name_can_be_found_with_a_suffix_added() {
+    // `'suffixesadd'`: "used when searching for a file for the "gf" … commands …
+    // to check for file names with a suffix added" — a name in a comment is a
+    // name without its extension as often as not.
+    let dir = std::env::temp_dir().join("inkstone-suffixes");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(dir.join("other.txt"), "x\n").unwrap();
+
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("main\n");
+    ed.cursor = Cursor::new(0, 0);
+    ed.execute_cmdline(&format!("set path={}", dir.display()));
+    // Without the setting the name is what it says.
+    feed(&mut ed, "gf");
+    assert_eq!(ed.message, "E484: Can't open file main");
+
+    ed.execute_cmdline("set suffixesadd=.rs,.c");
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("main.rs")),
+        "found with the suffix: {:?}",
+        ed.buffer.path()
+    );
+    assert_eq!(ed.buffer.text(), "fn main() {}\n");
+
+    // A name that is there wins over one a suffix would make.
+    ed.buffer = Buffer::from_text("other.txt\n");
+    ed.cursor = Cursor::new(0, 0);
+    feed(&mut ed, "gf");
+    assert!(
+        ed.buffer
+            .path()
+            .is_some_and(|path| path.ends_with("other.txt")),
+        "the name as written: {:?}",
+        ed.buffer.path()
+    );
+}

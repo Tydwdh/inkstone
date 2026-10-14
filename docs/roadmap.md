@@ -2997,6 +2997,27 @@ it.
 - **Left for later:** the combined `**;stop`, and the `cpoptions`/`d` rule about
   where a relative upward search starts.
 
+## Done — `'suffixesadd'`
+
+The last of `gf`'s lookup rules that is a *setting* rather than an expression: a
+name in a comment is a name without its extension as often as not.
+
+- **What shipped:** `'suffixesadd'`, a comma-separated list of suffixes tried when
+  the name as written is not there — "used when searching for a file for the "gf"
+  … commands … to check for file names with a suffix added". `:set
+  suffixesadd=.rs` finds `main.rs` from `main`, and a name that *is* there wins
+  over one a suffix would make.
+- **Constraints it had to respect, and how:** the order. Vim nests the two loops
+  the other way round (each `'path'` entry, then each suffix); here the name as
+  written is looked for over every entry first, and only then each suffix. With
+  one entry the two are the same, and with several this order is the one where
+  what a person typed beats what a setting guessed — which is written down here
+  because it is a decision, not a transcription.
+- **Files:** `inkstone-core` (`settings.rs`, `goto_file_at`'s suffix loop).
+- **Left for later:** `'includeexpr'`, which is an expression and wants the same
+  design as `'foldtext'`; `~user` and environment-variable expansion in a name;
+  and the visual-mode `gf`, which uses the selection rather than `isfname`.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

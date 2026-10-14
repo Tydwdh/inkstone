@@ -221,6 +221,9 @@ settings! {
     /// what `#` is for in C — a preprocessor line is not indented like the code
     /// inside it. Empty by default, as in vim.
     FoldIgnore as foldignore: String = String::new(),
+    /// Suffixes tried when `gf` does not find the name it was given, as a
+    /// comma-separated list: `:set suffixesadd=.rs` finds `main.rs` from `main`.
+    SuffixesAdd as suffixesadd: String = String::new(),
     /// Where `gf` looks when the file it is given is not beside the one that is
     /// open: a comma-separated list of directories, searched in order. Empty by
     /// default, as in vim.

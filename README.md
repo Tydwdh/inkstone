@@ -423,8 +423,9 @@ search *upwards*: `include;/usr` looks in `include`, then in the directory it is
 and so on up to `/usr` — and `dir;` with nothing after the semicolon goes to the
 root. A count takes the
 count'th file the search finds (`2gf`), trailing punctuation is not part of the name
-(`see src/main.rs.` is `src/main.rs`), and `gF` reads a number after the name as a
-line to put the cursor on (`src/main.rs 42`). A name that is not there says `E484`
+(`see src/main.rs.` is `src/main.rs`), `'suffixesadd'` is tried when the name as
+written is not there (`:set suffixesadd=.rs` finds `main.rs` from `main`), and `gF`
+reads a number after the name as a line to put the cursor on (`src/main.rs 42`). A name that is not there says `E484`
 rather than being made into a new file: `:e` is how a person makes one, and `gf` is
 a jump.
 
@@ -723,7 +724,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` and `foldminlines` (integers), `foldnestmax` (an integer) and `foldignore` (characters) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel` and `foldminlines` (integers), `foldnestmax` (an integer), `foldignore` (characters) and `suffixesadd` (a comma-separated list) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

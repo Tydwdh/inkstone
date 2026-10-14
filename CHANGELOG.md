@@ -26,6 +26,10 @@
   match here is a stretch of text and cannot be cut in half`.
 
 ### Added
+- `'suffixesadd'`: suffixes `gf` tries when the name as written is not there, so
+  `:set suffixesadd=.rs` finds `main.rs` from `main`. The name as written is
+  looked for over every `'path'` entry first, so what a person typed wins over
+  what a setting guessed.
 - A `'path'` entry can search *upwards*, which is vim's second kind of file
   searching: `include;/usr` looks in `include` and in every directory above it up
   to the stop directory, and `dir;` goes to the root. A directory that is not

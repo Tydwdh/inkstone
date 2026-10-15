@@ -3537,6 +3537,21 @@ are, which is the point of the split. [`rendering.md`](rendering.md) covers
 everything a frontend needs, [`selection.md`](selection.md) the pointer and the
 clipboard.
 
+### 2. A terminal, and the note is already written
+
+`:term` — a program whose output is a screen rather than a document, and the
+last thing [`jobs.md`](jobs.md) promised. [`terminal.md`](terminal.md) is the
+design note the rule asks for, and it concludes that this one does *not* want to
+change the wire: a frontend draws a grid of cells with attribute bits already,
+and where those bits come from — the highlighter or an escape sequence — is
+decided in `compose`, in the kernel.
+
+What it needs is a pseudo-terminal (ConPTY on Windows, `openpty` on Unix), a
+parser for what a terminal writes (`vte`), and a third `BufferKind` whose
+attributes are a side table rather than the syntax colours. The running, the
+typing and the scrollback are `jobs.md`'s machinery and the buffer's own lines.
+It should be split again the moment a frontend has to know anything about it.
+
 ## Known gaps that are not features
 
 - A brand-new empty file is written as one byte (`"\n"`) rather than vim's zero.

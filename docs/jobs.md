@@ -93,6 +93,20 @@ holding only standard output would hold the half nobody asked for. They are
 appended rather than interleaved, which is the honest approximation: the order
 between them is the order they arrived in, and the order *within* each is exact.
 
+## What a script gets
+
+`ed.shell(command, callback)` runs a command and hands the answer to Lua: the
+callback is called the way every other Lua callback in this host is — one table,
+the output first and the exit code second, `-1` when a command was killed — and
+what it asks for runs when it returns.
+
+The text of the buffer is *not* reachable from Lua, and that is the design rather
+than a gap: the kernel owns the text, and a script reaches it the way a person
+does — by running commands. `ed.run("normal", { "ihello<Esc>" })` is the door for
+typing, and it is the door with the undo history behind it. What a script *can* be
+handed is what comes from outside the editor: `ed.read_file(path)` and
+`ed.write_file(path, text)`, and whatever a command it ran has to say.
+
 ## What is not here
 
 - No terminal: a command that wants to *draw* — an editor, `top`, a password

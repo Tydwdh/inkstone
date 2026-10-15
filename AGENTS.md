@@ -4,9 +4,9 @@ Orientation for a new contributor — human or agent — picking this up cold.
 [`README.md`](README.md) is for users, [`ARCHITECTURE.md`](ARCHITECTURE.md) is
 the contract, [`docs/roadmap.md`](docs/roadmap.md) is what is done and what
 comes next, and the design notes under [`docs/`](docs) — `undo`, `windows`,
-`buffers`, `selection`, `highlighting`, `rendering`, `lsp`, `files`, `jobs` —
-are how each
-of those areas was decided. This file is how to work on it without breaking it.
+`buffers`, `selection`, `highlighting`, `rendering`, `lsp`, `files`, `jobs`,
+`terminal` — are how each of those areas was decided. This file is how to work on
+it without breaking it.
 
 ## The one-paragraph summary
 
@@ -45,9 +45,9 @@ when nothing did).
 
 ## What is not tested, and how to check it
 
-The workspace is covered by 648 tests, including one that drives the real
+The workspace is covered by 652 tests, including one that drives the real
 daemon binary over pipes and inspects the bytes it writes. The kernel, the
-protocol and the daemon are 577 of them; the rest belong to the frontends, the
+protocol and the daemon are 581 of them; the rest belong to the frontends, the
 client and the LSP crate.
 **A frontend's drawing is not covered by CI and cannot be**: raw mode needs a
 real terminal, and a window needs a real window. Both the window's metrics and

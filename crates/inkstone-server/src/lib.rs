@@ -1125,6 +1125,11 @@ impl Session {
     /// is what keeps a ten-second build from being ten seconds of a frozen
     /// editor, and it is the same shape the language server has.
     fn tick_job(&mut self) {
+        // A script's own requests arrive without a key behind them — `init.lua`
+        // calling `ed.shell` is the case — so the queue is drained here too, and
+        // before the job slot is looked at: the request that starts a command is
+        // often the one this turn's tick has to see.
+        self.editor.run_pending_lua();
         if self.running.is_none() {
             if let Some(request) = self.editor.job_request() {
                 match job::spawn(&request.command, request.input.as_deref()) {

@@ -29,6 +29,13 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
+/// The name a Lua `ed.shell` callback is registered under.
+///
+/// One command runs at a time — a second `:!` is refused, and the same rule holds
+/// for a script — so one name is enough, and a name nothing else would use keeps
+/// it out of the way of the commands a script defines.
+pub(crate) const SHELL_CALLBACK: &str = "<shell>";
+
 use inkstone_rpc::Param;
 
 use crate::command::CommandRegistry;
@@ -213,6 +220,53 @@ impl LuaHost {
                 })?,
         )?;
 
+        // The text of the buffer is not reachable from here, and that is the
+        // design: the kernel owns it, and a script reaches it the way a person
+        // does — by running commands, `ed.run("normal", { "ihello<Esc>" })` among
+        // them. What a script *can* be handed is what comes from outside the
+        // editor, and that is what these are for.
+        ed.set(
+            "read_file",
+            self.lua.create_function(move |_, path: String| {
+                std::fs::read_to_string(&path)
+                    .map_err(|e| mlua::Error::RuntimeError(format!("ed.read_file: {path}: {e}")))
+            })?,
+        )?;
+        ed.set(
+            "write_file",
+            self.lua
+                .create_function(move |_, (path, text): (String, String)| {
+                    std::fs::write(&path, text).map_err(|e| {
+                        mlua::Error::RuntimeError(format!("ed.write_file: {path}: {e}"))
+                    })
+                })?,
+        )?;
+
+        // `ed.shell(command, callback)`: run a program, and be told what it said
+        // when it is done. The callback is called the way every other Lua
+        // callback in this host is — one table, the output first and the exit
+        // code second — and the name it is registered under is what crosses to
+        // the editor, because the editor can call a command by name and nothing
+        // else.
+        let commands = Rc::clone(&self.commands);
+        let pending = Rc::clone(&self.pending);
+        ed.set(
+            "shell",
+            self.lua.create_function(
+                move |_, (command, callback): (String, Option<Function>)| {
+                    if let Some(callback) = callback {
+                        commands
+                            .borrow_mut()
+                            .insert(SHELL_CALLBACK.to_string(), callback);
+                    }
+                    pending
+                        .borrow_mut()
+                        .push_back(("shell".to_string(), vec![Param::Str(command)]));
+                    Ok(())
+                },
+            )?,
+        )?;
+
         self.lua.globals().set("ed", ed)?;
         Ok(())
     }
@@ -340,6 +394,30 @@ ed.map("n", "Q", "to_end_of_word")
         ed.cursor = Cursor::new(0, 0);
         feed(&mut ed, "Q");
         assert_eq!(ed.cursor.col, 4);
+    }
+
+    #[test]
+    fn a_script_types_text_through_normal() {
+        // `ed.run("normal", …)` is the door Lua has to the text, and it is the
+        // door with the undo history behind it.
+        let mut ed = editor_with_init(
+            "normal",
+            r#"
+ed.command("stamp", function(params)
+  ed.run("normal", { "i" .. params[1] .. "<Esc>" })
+end)
+"#,
+        );
+        ed.buffer = crate::buffer::Buffer::from_text("one\ntwo\n");
+        ed.cursor = Cursor::new(0, 0);
+        ed.run_command("stamp", &[Param::Str("X".to_string())]);
+
+        assert_eq!(ed.buffer.text(), "Xone\ntwo\n");
+        assert_eq!(ed.mode, Mode::Normal, "the keys end in normal mode");
+        // One edit, so one `u`: the typing went through the same door a person's
+        // keys do.
+        ed.run_command("undo", &[]);
+        assert_eq!(ed.buffer.text(), "one\ntwo\n");
     }
 
     #[test]

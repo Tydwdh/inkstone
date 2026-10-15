@@ -143,6 +143,30 @@ impl Editor {
         self.redraw = true;
     }
 
+    /// Run whatever a Lua callback has asked for, and whatever those ask for in
+    /// turn.
+    ///
+    /// A callback arrives from somewhere that is not a key — a command that has
+    /// finished, or a script's own `init.lua` — so the queue is drained there
+    /// too, with the same depth guard as anywhere else: a callback that runs a
+    /// command which calls the callback again is a loop like any other.
+    pub fn run_pending_lua(&mut self) {
+        let mut depth = 0;
+        let mut next = self.lua.take_pending();
+        while let Some((name, params)) = next.take() {
+            if let Err(message) = self.run_named(&name, &params) {
+                self.message = message;
+                return;
+            }
+            depth += 1;
+            if depth > MAX_COMMAND_DEPTH {
+                self.message = "E5108: command nesting too deep".to_string();
+                return;
+            }
+            next = self.lua.take_pending();
+        }
+    }
+
     pub(super) fn run_named(&mut self, name: &str, params: &[Param]) -> Result<(), String> {
         // Copy the function pointer out so the registry borrow ends before the
         // editor is borrowed mutably.

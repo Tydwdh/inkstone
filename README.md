@@ -50,7 +50,9 @@ in is an entry made, a name taken out is one removed), running commands
 (`<C-o>`, `<C-i>`) and a change list (`g;`, `g,`), mouse selection and the
 clipboard, command-line editing with history and multi-key insert mappings,
 language-server answers when one is running (diagnostics, `K`, `gd`, `gr`,
-completion with snippets, `<C-k>`, `:format`), Lua configuration (`init.lua`),
+completion with snippets, `<C-k>`, `:format`), Lua configuration (`init.lua`:
+remaps, commands, options, `ed.shell` with a callback, `ed.read_file` and
+`ed.write_file`),
 line numbers, tabstop, status line, `.` to do the last change again, and
 `f`/`t`/`F`/`T` character finds.
 

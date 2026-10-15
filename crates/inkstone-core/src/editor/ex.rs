@@ -925,12 +925,7 @@ impl Editor {
             }
             let at = self.buffer.line_col_to_char(row, 0);
             self.cursor.set_char_idx(&self.buffer, at);
-            for key in crate::keymap::parse_normal_keys(keys) {
-                self.handle_key(key);
-            }
-            if self.mode == Mode::Insert {
-                self.run_command("escape", &[]);
-            }
+            self.type_normal_keys(keys);
         }
         if self.message.is_empty() {
             self.message = format!(
@@ -939,6 +934,24 @@ impl Editor {
             );
         }
         true
+    }
+
+    /// Type `keys` at the cursor, as if they had been pressed.
+    ///
+    /// The one place the keys of a `:normal` become keys, so that a script can
+    /// type the way a person does: `ed.run("normal", { "ihello<Esc>" })` is the
+    /// door Lua has to the text, and it is the door with the undo history behind
+    /// it.
+    pub(crate) fn type_normal_keys(&mut self, keys: &str) {
+        for key in crate::keymap::parse_normal_keys(keys) {
+            self.handle_key(key);
+        }
+        // A run that is still inserting when its keys end is put back into normal
+        // mode, which is what makes the old idiom `:%normal A;` append to every
+        // line rather than to the first.
+        if self.mode == Mode::Insert {
+            self.run_command("escape", &[]);
+        }
     }
 
     // `:{range}format` is the server's formatting, for the lines a range

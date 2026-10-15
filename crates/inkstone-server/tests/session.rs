@@ -910,6 +910,39 @@ fn a_command_that_will_not_finish_can_be_killed() {
     );
 }
 
+#[test]
+fn a_script_runs_a_command_and_acts_on_what_it_said() {
+    let dir = temp_dir("lua-job");
+    let init = dir.join("job-init.lua");
+    std::fs::write(
+        &init,
+        r#"
+ed.shell("echo from lua", function(params)
+    ed.run("normal", { "i" .. params[1] .. "<Esc>" })
+end)
+"#,
+    )
+    .unwrap();
+
+    let mut session = Session::new(Editor::new(Some(&init)).expect("editor"));
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 40, rows: 6 }],
+    );
+
+    // The command runs, and the callback types what it said into the buffer —
+    // which is the whole story of a script with hands.
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen).iter().any(|row| row.trim_end() == "from lua")
+        }),
+        "the output was typed into the buffer: {:?}",
+        rows(&screen)
+    );
+}
+
 /// The real thing: spawn `inkstone-server`, talk to it over its pipes, then check
 /// that the file it wrote is on disk.
 #[test]

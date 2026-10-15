@@ -48,6 +48,8 @@ enum JobAction {
         end: usize,
         text: String,
     },
+    /// `ed.shell(cmd, callback)` — what the command said goes to Lua.
+    Call { callback: String },
 }
 
 impl Editor {
@@ -107,6 +109,28 @@ impl Editor {
         self.start_job(command, JobAction::Read { row, line });
     }
 
+    /// Run `command` for a script, and call `callback` with what it said.
+    ///
+    /// The script's half of `:!`: the same job, the same threads, and the same
+    /// one-at-a-time rule — the difference is where the answer goes.
+    pub(crate) fn shell_with_callback(&mut self, command: &str, callback: &str) {
+        let command = command.trim();
+        if command.is_empty() {
+            self.message = "E471: Argument required".to_string();
+            return;
+        }
+        if let Some(running) = &self.job {
+            self.message = format!("E: {} is still running (:kill stops it)", running.command);
+            return;
+        }
+        self.start_job(
+            command,
+            JobAction::Call {
+                callback: callback.to_string(),
+            },
+        );
+    }
+
     /// `:kill` — stop the command that is running.
     pub(crate) fn kill_job(&mut self) {
         if self.job.is_none() {
@@ -137,7 +161,7 @@ impl Editor {
         job.started = true;
         let input = match &job.action {
             JobAction::Filter { text, .. } => Some(text.clone()),
-            JobAction::Shell | JobAction::Read { .. } => None,
+            JobAction::Shell | JobAction::Read { .. } | JobAction::Call { .. } => None,
         };
         Some(JobRequest {
             command: job.command.clone(),
@@ -215,6 +239,23 @@ impl Editor {
                 self.replace_range(start, end, &replacement, Some(start));
                 self.after_edit();
                 self.message = format!("{count} lines filtered");
+            }
+            JobAction::Call { callback } => {
+                // The output and the code, in that order; a command that was
+                // killed has no code, and `-1` says so rather than saying zero.
+                let code = status.map(i64::from).unwrap_or(-1);
+                if let Err(error) = self
+                    .lua
+                    .call_command(&callback, &[Param::Str(output), Param::Int(code)])
+                {
+                    self.message = format!("{callback}: {error}");
+                    self.redraw = true;
+                    return;
+                }
+                // Whatever the callback asked for runs now: a callback that
+                // cannot act is a callback that cannot do anything.
+                self.run_pending_lua();
+                self.message = format!("!{}", job.command);
             }
         }
         if failed {

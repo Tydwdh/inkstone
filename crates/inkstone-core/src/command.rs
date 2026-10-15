@@ -239,6 +239,8 @@ impl CommandRegistry {
         open_place,
         up_directory,
         kill_command,
+        shell,
+        normal,
         complete_next,
         complete_previous,
         complete_accept,
@@ -1759,6 +1761,36 @@ fn open_place(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 /// line below it.
 fn up_directory(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.up_directory();
+    Ok(())
+}
+
+/// `shell` — run a command, and hand what it said to the Lua callback `ed.shell`
+/// registered.
+///
+/// The command exists for the script host to reach: a `:!` is a line of ex, not a
+/// command, so this is how `ed.run("shell", { "cargo fmt" })` gets there. The
+/// callback is named once — one command runs at a time — and it is what makes a
+/// script's work asynchronous without the editor waiting for it.
+fn shell(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let Some(command) = str_param(params) else {
+        editor.message = "E471: Argument required".to_string();
+        return Ok(());
+    };
+    editor.shell_with_callback(command, crate::lua::SHELL_CALLBACK);
+    Ok(())
+}
+
+/// `normal` — type these keys at the cursor, as if they had been pressed.
+///
+/// `:normal` is a line of ex; this is the same thing as a command, which is what
+/// a script needs: it is the only door Lua has to the text, and the door has the
+/// undo history behind it — `ed.run("normal", { "ihello<Esc>" })` is one `u`.
+fn normal(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    let Some(keys) = str_param(params) else {
+        editor.message = "E471: Argument required".to_string();
+        return Ok(());
+    };
+    editor.type_normal_keys(keys);
     Ok(())
 }
 

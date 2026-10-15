@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Lua can reach outside the editor now, without the editor waiting: `ed.shell(cmd,
+  callback)` runs a command and calls back with what it said and what it exited
+  with, `ed.read_file` and `ed.write_file` touch the filesystem, and a callback
+  can act when it returns. The text of the buffer is deliberately still not
+  reachable from Lua — the kernel owns it — but `ed.run("normal", { "ihello<Esc>" })`
+  is the door for typing, and it is the door with the undo history behind it:
+  `:normal` is a command now, so a script types the way a person does.
 - Commands can be run: `:!cmd` runs one and puts what it said in a window of its
   own, `:r !cmd` reads its output into the buffer below the line the command was
   given from, and `:{range}!cmd` — `:%!sort`, `:2,5!jq .` — filters those lines

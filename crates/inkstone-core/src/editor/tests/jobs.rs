@@ -276,6 +276,80 @@ fn a_read_inserts_lines_that_end_the_way_the_line_above_them_does() {
 }
 
 #[test]
+fn lua_can_run_a_command_and_act_on_what_it_said() {
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\ntwo\n");
+    ed.lua
+        .load_str(
+            "test",
+            r#"
+            ed.shell("echo hi", function(params)
+                -- A callback is called the way every other Lua callback in this
+                -- host is: one table, the output first and the code second.
+                if params[2] == 0 and params[1]:find("hi") then
+                    ed.run("delete_line")
+                end
+            end)
+            "#,
+        )
+        .unwrap();
+
+    // `ed.shell` queues a command for the editor the way every other `ed.run`
+    // does; draining the queue is what the editor does after a key.
+    ed.run_pending_lua();
+    let request = ed.job_request().expect("the command was asked for");
+    assert_eq!(request.command, "echo hi");
+
+    ed.job_finished("hi\n".into(), String::new(), Some(0));
+    assert_eq!(
+        ed.buffer.text(),
+        "two\n",
+        "the callback ran, and the command it ran did; message: {}",
+        ed.message
+    );
+    assert_eq!(ed.message, "!echo hi");
+}
+
+#[test]
+fn lua_can_read_and_write_a_file() {
+    let dir = std::env::temp_dir().join("inkstone-jobs-lua");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let written = dir.join("from-lua.txt");
+    // A Lua string has no escape for a Windows separator, and a path with one in
+    // it is a path with a backslash in it: forward slashes are the same path.
+    let path = written.to_string_lossy().replace('\\', "/");
+
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one\ntwo\n");
+    ed.lua
+        .load_str(
+            "test",
+            &format!(
+                r#"
+                ed.write_file("{path}", "written by a script\n")
+                local back = ed.read_file("{path}")
+                if back == "written by a script\n" then
+                    ed.run("delete_line")
+                end
+                "#,
+            ),
+        )
+        .unwrap();
+    ed.run_pending_lua();
+
+    assert_eq!(
+        std::fs::read_to_string(&written).unwrap(),
+        "written by a script\n"
+    );
+    assert_eq!(
+        ed.buffer.text(),
+        "two\n",
+        "and the script could read it back"
+    );
+}
+
+#[test]
 fn a_killed_command_says_so_rather_than_naming_a_code() {
     let mut ed = Editor::for_tests();
     ed.execute_cmdline("!sleep 100");

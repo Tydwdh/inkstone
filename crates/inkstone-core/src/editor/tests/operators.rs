@@ -1555,18 +1555,10 @@ fn reopening_the_same_file_reloads_it_rather_than_duplicating_it() {
 }
 
 #[test]
-fn a_name_that_cannot_be_read_opens_nothing() {
+fn a_name_that_is_not_there_is_a_new_file() {
     let dir = std::env::temp_dir().join("inkstone-editor-tests");
     std::fs::create_dir_all(&dir).unwrap();
     let mut ed = Editor::for_tests();
-    // A directory is not a file to read, so nothing happens at all.
-    ed.execute_cmdline(&format!("e {}", dir.display()));
-    assert_eq!(ed.documents.len(), 1, "nothing was opened");
-    assert_eq!(ed.buffer.path(), None, "and nothing was named");
-    // The wording of the failure is the platform's, so only that there was
-    // one is asserted.
-    assert!(!ed.message.is_empty(), "the failure was reported");
-
     // A path that is not there yet is a new file, and as the first file it
     // takes the empty window's place rather than being added beside it.
     let fresh = dir.join("brand-new.txt");

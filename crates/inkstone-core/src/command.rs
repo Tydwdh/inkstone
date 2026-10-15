@@ -237,6 +237,7 @@ impl CommandRegistry {
         open_diagnostics,
         close_diagnostics,
         open_place,
+        up_directory,
         complete_next,
         complete_previous,
         complete_accept,
@@ -1745,6 +1746,18 @@ fn close_diagnostics(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 /// list of them.
 fn open_place(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.open_place_at_cursor();
+    Ok(())
+}
+
+/// `-` — the listing of the directory above this one, and a line up everywhere
+/// else.
+///
+/// vim gives `-` the motion "up one line, on the first non-blank character". A
+/// listing has somewhere to go *up to*, and that is what a person means by the
+/// key there — the same bargain `<CR>` strikes between a list of places and the
+/// line below it.
+fn up_directory(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    editor.up_directory();
     Ok(())
 }
 
@@ -3998,7 +4011,7 @@ fn open_named(editor: &mut Editor, name: &str, count: usize, line: Option<usize>
     let name = name.to_string();
     let Some(path) = candidates
         .into_iter()
-        .filter(|path| path.is_file())
+        .filter(|path| path.exists())
         .nth(count.saturating_sub(1))
     else {
         editor.message = format!("E484: Can't open file {name}");
@@ -4006,8 +4019,9 @@ fn open_named(editor: &mut Editor, name: &str, count: usize, line: Option<usize>
     };
     // A name that is not there is refused rather than opened: `:e` makes a new
     // file out of a name a person typed, and `gf` is a jump — vim's rule, and the
-    // reason `gf` on a name that has been deleted says so.
-    if !path.is_file() {
+    // reason `gf` on a name that has been deleted says so. A directory is there,
+    // and it opens as the listing of what is in it.
+    if !path.exists() {
         editor.message = format!("E484: Can't open file {name}");
         return Ok(());
     }
@@ -4094,7 +4108,7 @@ fn path_candidates(entry: &Path, name: &str) -> Vec<std::path::PathBuf> {
 /// `canonicalize` answers with it — a valid path, and one nobody types — and the
 /// candidate is a path a person reads in the status line, so it is spelled the
 /// way they would spell it.
-fn tidy(path: std::path::PathBuf) -> std::path::PathBuf {
+pub(crate) fn tidy(path: std::path::PathBuf) -> std::path::PathBuf {
     let text = path.to_string_lossy();
     match text.strip_prefix(r"\\?\") {
         Some(rest) => std::path::PathBuf::from(rest),

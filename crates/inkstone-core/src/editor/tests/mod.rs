@@ -11,6 +11,7 @@ mod folds;
 mod indent;
 mod insert;
 mod keys;
+mod listing;
 mod lsp;
 mod marks;
 mod motions;

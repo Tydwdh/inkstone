@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+- A directory opens as a **listing** — `inkstone .`, `:e src`, or `gf` on a name
+  that turns out to be one. It shows what is in the directory, one entry to a
+  line, directories first and marked with a `/`, and the path it was opened with
+  in the status line. `<CR>` goes to the entry the cursor is on: a directory
+  takes the listing's place, because walking down and back up is one document
+  rather than a pile of them, and a file opens as a document of its own, so the
+  listing stays behind where `:b` finds it again. `-` goes up a level, and is
+  vim's "up one line" anywhere that is not a listing. Reading a directory as a
+  file used to fail with whatever the platform calls that — `i/o error: 拒绝访问。
+  (os error 5)` on Windows — which is a poor answer to a question as clear as
+  "show me this folder".
+
 ### Fixed
 - `:copen {pattern}` and `:lopen {pattern}` take a *search's* pattern: a group is
   a group rather than the characters `(a)`, `\zs` means what it means to a

@@ -414,6 +414,13 @@ impl Editor {
             self.run_history_line();
             return;
         }
+        // A listing is a list of places too — the cursor's line names an entry,
+        // and `<CR>` goes to it. That is the same gesture as a list of search
+        // results, which is why it is the same key.
+        if self.buffer.is_listing() {
+            self.open_listing_entry();
+            return;
+        }
         if self.list.is_none() {
             // Anywhere else, `<CR>` is the motion it always was.
             self.run_command("move_down", &[]);
@@ -437,6 +444,62 @@ impl Editor {
             return;
         }
         let _ = self.goto_location(&path, line, col);
+    }
+
+    /// `<CR>` in a listing: open what the line under the cursor names.
+    ///
+    /// A directory takes the listing's place, so that walking down and back up
+    /// is one document rather than a pile of them. A file opens as a document of
+    /// its own, so the listing it came from stays where `:b` finds it again.
+    fn open_listing_entry(&mut self) {
+        let Some(dir) = self.buffer.path().map(Path::to_path_buf) else {
+            return;
+        };
+        let name = self.buffer.line_string(self.cursor.row);
+        // An empty line names nothing: that is what a listing of an empty
+        // directory holds, and what a line somebody is about to type into holds.
+        if name.is_empty() {
+            return;
+        }
+        // The trailing `/` is how a listing *says* "directory"; it is not part of
+        // the name it says it about.
+        let target = dir.join(name.strip_suffix('/').unwrap_or(&name));
+        let opened = if target.is_dir() {
+            self.load_file(&target)
+        } else {
+            self.open_file(&target)
+        };
+        if let Err(e) = opened {
+            self.message = e.to_string();
+        }
+    }
+
+    /// `-` in a listing: the listing of the directory above this one.
+    ///
+    /// Anywhere else the key is vim's motion, up one line. The parent of a path
+    /// like `.` is the empty path rather than the directory above it, so the
+    /// walk goes through what the directory really is — and through `tidy`, for
+    /// the prefix Windows puts on a canonical path.
+    pub(crate) fn up_directory(&mut self) {
+        if !self.buffer.is_listing() {
+            self.run_command("move_up", &[]);
+            return;
+        }
+        let Some(dir) = self.buffer.path().map(Path::to_path_buf) else {
+            return;
+        };
+        let parent = std::fs::canonicalize(&dir)
+            .ok()
+            .map(crate::command::tidy)
+            .and_then(|here| here.parent().map(Path::to_path_buf));
+        // The filesystem root has no parent, and `/` is already as far up as a
+        // listing goes.
+        let Some(parent) = parent else {
+            return;
+        };
+        if let Err(e) = self.load_file(&parent) {
+            self.message = e.to_string();
+        }
     }
 
     /// Open what a language server said about this file in a window of its own.

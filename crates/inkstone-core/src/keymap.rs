@@ -122,6 +122,7 @@ impl Keymap {
             ("v", &["enter_visual"]),
             ("V", &["enter_visual_line"]),
             ("<CR>", &["open_place"]),
+            ("-", &["up_directory"]),
             ("=", &["reindent_motion"]),
             ("<GT>", &["indent_motion"]),
             ("<LT>", &["outdent_motion"]),

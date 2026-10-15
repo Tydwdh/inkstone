@@ -198,6 +198,7 @@ notation;
 | n | `u` | `undo` |
 | n | `~` | `toggle_case` |
 | n | `<CR>` | `open_place` |
+| n | `-` | `up_directory` |
 | n | `=` | `reindent_motion` |
 | n | `<gt>` | `indent_motion` |
 | n | `<lt>` | `outdent_motion` |

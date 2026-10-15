@@ -58,6 +58,33 @@ pub struct Buffer {
     /// length and its modification time. `None` means there is nothing on disk to
     /// compare with — a scratch buffer, or a path that did not exist.
     stamp: Option<(u64, std::time::SystemTime)>,
+    kind: BufferKind,
+}
+
+/// What the text of a buffer *is*.
+///
+/// A document holds a file, and writing it writes those bytes. A listing holds
+/// what a directory holds, one entry to a line, and writing it makes the
+/// directory match the text — which is what makes a file manager out of an
+/// editor whose only interface is text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BufferKind {
+    /// The text is the file the path names.
+    File,
+    /// The path names a directory. The lines are its entries, and `entries` is
+    /// what the directory looked like when this buffer last read or wrote it —
+    /// the same fact `stamp` is for a file, and the baseline a save is measured
+    /// against.
+    Listing { entries: Vec<Entry> },
+}
+
+/// One entry of a listing, as the directory last looked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Entry {
+    /// The name, without a trailing separator.
+    pub name: String,
+    /// Whether it is a directory. A listing shows that as a trailing `/`.
+    pub is_dir: bool,
 }
 
 impl Buffer {
@@ -67,6 +94,7 @@ impl Buffer {
             rope: Rope::from("\n"),
             path: None,
             stamp: None,
+            kind: BufferKind::File,
         }
     }
 
@@ -78,13 +106,22 @@ impl Buffer {
 
     /// Load `path`, or create an empty buffer bound to it if it does not exist.
     ///
+    /// A directory is not read as bytes — that is not a thing a directory is —
+    /// but as the list of what is in it. What a person means by opening a
+    /// directory is as clear as what they mean by opening a file, and it is the
+    /// same gesture that gets them there.
+    ///
     /// Errors when the file exists but cannot be read, or is not UTF-8.
     pub fn from_path(path: &Path) -> Result<Self, BufferError> {
+        if path.is_dir() {
+            return Self::listing(path);
+        }
         if !path.exists() {
             return Ok(Self {
                 rope: Rope::from("\n"),
                 path: Some(path.to_path_buf()),
                 stamp: None,
+                kind: BufferKind::File,
             });
         }
         let bytes = std::fs::read(path)?;
@@ -94,6 +131,24 @@ impl Buffer {
             rope: Rope::from_str(&text),
             path: Some(path.to_path_buf()),
             stamp: Self::stamp_of(path),
+            kind: BufferKind::File,
+        };
+        buf.normalize();
+        Ok(buf)
+    }
+
+    /// Read `path` as the listing of a directory.
+    ///
+    /// The path is kept as it was given rather than resolved, because it is also
+    /// what the status line shows and what a save hands back to the filesystem:
+    /// the directory a person asked for is the one they keep seeing.
+    fn listing(path: &Path) -> Result<Self, BufferError> {
+        let entries = read_dir_entries(path)?;
+        let mut buf = Self {
+            rope: Rope::from_str(&listing_text(&entries)),
+            path: Some(path.to_path_buf()),
+            stamp: Self::stamp_of(path),
+            kind: BufferKind::Listing { entries },
         };
         buf.normalize();
         Ok(buf)
@@ -105,6 +160,7 @@ impl Buffer {
             rope: Rope::from_str(text),
             path: None,
             stamp: None,
+            kind: BufferKind::File,
         };
         buf.normalize();
         buf
@@ -148,13 +204,35 @@ impl Buffer {
 
     // -- accessors ----------------------------------------------------------
 
-    /// Where this buffer came from, if anywhere. `None` means a scratch buffer.
+    /// Where this buffer came from, if anywhere. `None` means a scratch buffer,
+    /// and a listing's path is the directory it lists.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
 
+    /// Whether this buffer lists a directory rather than holding a file.
+    ///
+    /// The one question a command has to ask before treating the text as a file
+    /// it could write: `:w` of a listing is not a write.
+    pub(crate) fn is_listing(&self) -> bool {
+        matches!(self.kind, BufferKind::Listing { .. })
+    }
+
     /// The name to show in the status line.
     pub fn display_name(&self) -> String {
+        if self.is_listing() {
+            // The name of a directory says very little about where a person is
+            // — `src` is four characters and so is `tmp` — so a listing shows
+            // the path it was opened with, and the trailing separator is what
+            // says it is a directory at all.
+            return match self.path.as_deref() {
+                // The separator is the platform's, because this is a path in a
+                // status line and mixes with the rest of one; the *listing* uses
+                // `/`, because that is a format rather than a path.
+                Some(path) => format!("{}{}", path.display(), std::path::MAIN_SEPARATOR),
+                None => "[No Name]".to_string(),
+            };
+        }
         self.path
             .as_deref()
             .and_then(Path::file_name)
@@ -328,6 +406,47 @@ impl Buffer {
             self.rope.insert_char(len, '\n');
         }
     }
+}
+
+/// The entries of `dir`, directories first and each group by name.
+///
+/// Directories first because that is what a listing is for: walking down is what
+/// a person does with one, and the names they walk into should not be scattered
+/// through the files. The order within a group is the one `:vimgrep` walks a
+/// directory in, so the two agree about what "in order" means.
+fn read_dir_entries(dir: &Path) -> Result<Vec<Entry>, BufferError> {
+    let mut entries: Vec<Entry> = std::fs::read_dir(dir)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| Entry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            is_dir: entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false),
+        })
+        .collect();
+    entries.sort_by(|one, other| {
+        other
+            .is_dir
+            .cmp(&one.is_dir)
+            .then_with(|| one.name.cmp(&other.name))
+    });
+    Ok(entries)
+}
+
+/// The text a listing of `entries` shows: one name per line, a directory marked
+/// with a trailing `/`.
+///
+/// The marker is the whole of what a listing says about its entries, and it is
+/// what a person can type to say "make this a directory" — the format is the
+/// interface.
+fn listing_text(entries: &[Entry]) -> String {
+    let mut text = String::new();
+    for entry in entries {
+        text.push_str(&entry.name);
+        if entry.is_dir {
+            text.push('/');
+        }
+        text.push('\n');
+    }
+    text
 }
 
 /// Remove one terminator from the end of a rope line.
@@ -577,5 +696,66 @@ mod tests {
         let (start, end) = (0, buf.line_len(0) + buf.line_terminator_len(0));
         buf.replace_range(start, end, "");
         assert_eq!(buf.text(), "b\r\n");
+    }
+
+    /// A directory of the shape every listing test wants: two directories and
+    /// two files, one of each named so that byte order and eye order can be told
+    /// apart (`Cargo.toml` before `README.md`, `docs` before `src`).
+    fn a_directory(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\n").unwrap();
+        std::fs::write(dir.join("README.md"), "# hi\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_directory_reads_as_a_listing_with_directories_first() {
+        let dir = a_directory("inkstone-buffer-listing");
+        let buf = Buffer::from_path(&dir).unwrap();
+
+        assert!(buf.is_listing());
+        assert_eq!(buf.text(), "docs/\nsrc/\nCargo.toml\nREADME.md\n");
+        assert_eq!(buf.path(), Some(dir.as_path()));
+        // A listing shows the path it was opened with, and says it is one.
+        assert_eq!(
+            buf.display_name(),
+            format!("{}{}", dir.display(), std::path::MAIN_SEPARATOR)
+        );
+    }
+
+    #[test]
+    fn a_relative_directory_stays_relative_in_the_display_name() {
+        // Nothing is resolved: the path a person typed is the path they keep
+        // seeing, in the status line and in the messages that name it.
+        let buf = Buffer::from_path(Path::new(".")).unwrap();
+        assert!(buf.is_listing());
+        assert_eq!(
+            buf.display_name(),
+            format!(".{}", std::path::MAIN_SEPARATOR)
+        );
+    }
+
+    #[test]
+    fn an_empty_directory_is_a_listing_of_one_empty_line() {
+        let dir = std::env::temp_dir().join("inkstone-buffer-listing-empty");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let buf = Buffer::from_path(&dir).unwrap();
+        assert_eq!(buf.text(), "\n", "the line model holds even for nothing");
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn a_file_that_is_not_there_is_still_a_file() {
+        // The directory branch must not swallow the empty-document branch.
+        let dir = std::env::temp_dir().join("inkstone-buffer-listing-missing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let buf = Buffer::from_path(&dir.join("nothing.txt")).unwrap();
+        assert!(!buf.is_listing());
+        assert_eq!(buf.text(), "\n");
     }
 }

@@ -32,6 +32,7 @@ pub mod screen;
 pub mod search;
 pub mod settings;
 pub mod substitute;
+mod vimgrep;
 
 pub use buffer::{Buffer, BufferError};
 pub use command::{CommandError, CommandRegistry};

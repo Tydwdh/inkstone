@@ -28,7 +28,7 @@ worth keeping:
 | `inkstone-core/src/editor/keys.rs` | normal, visual and operator-pending keys |
 | `inkstone-core/src/editor/insert.rs` | insert mode |
 | `inkstone-core/src/editor/edits.rs` | `replace_range`, registers, undo, indent, case, joins |
-| `inkstone-core/src/editor/ex.rs` | the `:` line: parsing, the command table, `:g`, `:s` |
+| `inkstone-core/src/editor/ex.rs` | the `:` line: parsing, the command table, `:g`, `:s`, `:vimgrep` |
 | `inkstone-core/src/editor/prompt.rs` | the command line and the search preview |
 | `inkstone-core/src/editor/folds.rs` | folds, views, indent folding |
 | `inkstone-core/src/editor/pointer.rs` | the mouse, clicks, separators, scrolling |
@@ -317,7 +317,7 @@ and ignored — a config typo must not stop the editor from opening.
 | `E354: Invalid register name: X` | a `"` followed by something that is not a register |
 | `E486: Pattern not found: X` | a search, or `n`, with no match left to find |
 | `E35: No previous search pattern` | `/` or `n` before anything was searched for |
-| `E54: …` | a pattern that does not compile, or that asks for `\zs`/`\ze`; the engine's own explanation follows |
+| `E54: …` | a pattern that does not compile, or that asks for what the dialect cannot do: `\zs` inside a collection, a marker followed by a multi; the engine's own explanation follows |
 | `E348: No string under cursor` | `*` or `#` with no word under the cursor |
 | `E85: There is no other buffer` | `:bn` or `:bp` with one document open |
 | `E85: There is no other window` | a `<C-w>` key with one window |
@@ -336,6 +336,12 @@ and ignored — a config typo must not stop the editor from opening.
 | `E748: No previous macro` / `E748: No such macro: X` | `@@` before any `@a` / `@a` naming a register nothing was recorded into |
 | `E776: No command history` / `E776: No search history` | `q:` or `q/` with nothing in it |
 | `E776: No location list` / `E553: No more items` | `:colder` or `:cnewer` with no list yet / past either end of them |
+| `E683: File name missing or invalid pattern` | a `:vimgrep` with no pattern, or with no files to look in |
+| `E481: No range allowed` | `:1,5vimgrep`: the number in front of the command is a count of places to find, and a comma would mean a range |
+| `E480: No match: X` | a `:vimgrep` that found nothing in any of its files; the list is emptied |
+| `fuzzy matching is not implemented` | the `f` flag of `:vimgrep` |
+| `N matches in M files` | a `:vimgrep` with `j`: the list is filled and the cursor stays put |
+| `{index} of {count}: {path}` | going to a place in a list: `:cnext`, `<CR>` in a list window, or the first place a `:vimgrep` found |
 | `E784: Cannot close last tab page` | `:tabclose` with one tab |
 | `E20: Mark not set: X` | a jump to a place nothing was set or left: a mark, `''`, or `<C-o>`/`<C-i>` at either end of the jump list |
 | `E20: No previous visual selection` / `E20: No previous insert position` | `gv` / `gi` with nothing to go back to |

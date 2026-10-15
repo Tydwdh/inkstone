@@ -462,6 +462,16 @@ impl Editor {
             }
             return;
         }
+        // And `:vimgrep`, whose list is the one `:g` and the language server's
+        // answers fill as well. It is checked before the range below, because
+        // the number in front of it is a count and not an address.
+        if crate::vimgrep::Vimgrep::looks_like(line) {
+            match crate::vimgrep::Vimgrep::parse(line) {
+                Ok(spec) => self.run_vimgrep(&spec),
+                Err(error) => self.message = error.to_string(),
+            }
+            return;
+        }
         // An address or a range in front of a command that acts on lines: `:5d`,
         // `:'a,'bd`. Other commands ignore it, which is what vim does with a
         // range they have no use for — `:1,5w` writes the file, not five lines.
@@ -544,6 +554,116 @@ impl Editor {
             return;
         };
         self.run_command(name, &params);
+    }
+
+    /// Run `:vimgrep`: every place a pattern matches in a set of files, into the
+    /// places list.
+    ///
+    /// "Search for {pattern} in the files {file} ... and set the error list to
+    /// the matches" — the list `:copen` shows, `<CR>` goes to a line of, and
+    /// `:cnext` walks. Nothing is gone to unless the line asked for it: `j`
+    /// leaves the cursor where it is, and without it the first place is where
+    /// the cursor ends up, which is vim's rule.
+    pub(crate) fn run_vimgrep(&mut self, spec: &crate::vimgrep::Vimgrep) {
+        // `//` is the last pattern a search used. A `:vimgrep` does *not*
+        // become that pattern itself: vim says so by keeping its own, which is
+        // a thing a person notices only when they have typed both.
+        let pattern = if spec.pattern.is_empty() {
+            self.search.pattern().to_string()
+        } else {
+            spec.pattern.clone()
+        };
+        if pattern.is_empty() {
+            self.message = "E35: No previous search pattern".to_string();
+            return;
+        }
+        // "'smartcase' is not used" is the manual's own line about this command,
+        // so only a `\c` or `\C` in the pattern and `'ignorecase'` are asked.
+        let ignore_case = spec
+            .ignore_case
+            .unwrap_or_else(|| self.options.borrow().ignorecase);
+        let translated = match crate::dialect::translate(&pattern) {
+            Ok(translated) => translated,
+            Err(error) => {
+                self.message = format!("E54: {error}");
+                return;
+            }
+        };
+        let compiled = match regex::RegexBuilder::new(&translated.pattern)
+            .case_insensitive(ignore_case)
+            .build()
+        {
+            Ok(compiled) => compiled,
+            Err(error) => {
+                self.message = format!("E54: {error}");
+                return;
+            }
+        };
+
+        let limit = spec.limit.unwrap_or(usize::MAX);
+        let mut places: Vec<(PathBuf, usize, usize)> = Vec::new();
+        let mut files = 0;
+        for argument in &spec.files {
+            if places.len() >= limit {
+                break;
+            }
+            for path in crate::command::files_named(argument) {
+                if places.len() >= limit {
+                    break;
+                }
+                // A file that cannot be read is skipped rather than reported:
+                // an argument is a name, and a name that is not there is not a
+                // reason for a search to stop. vim says the same thing in the
+                // end, with "E480: No match" when nothing at all was found.
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let buffer = Buffer::from_text(&text);
+                let mut asked = None;
+                let mut here = 0;
+                for (start, _) in crate::search::find_places(&buffer, &compiled, &translated.extent)
+                {
+                    let (row, col) = buffer.char_to_line_col(start);
+                    // Without `g` a line is a place of its own once, however
+                    // often the pattern matches in it.
+                    let place = spec.all || asked != Some(row);
+                    asked = Some(row);
+                    if !place {
+                        continue;
+                    }
+                    places.push((path.clone(), row, col));
+                    here += 1;
+                    if places.len() >= limit {
+                        break;
+                    }
+                }
+                if here > 0 {
+                    files += 1;
+                }
+            }
+        }
+        if places.is_empty() {
+            // The list is emptied rather than left as it was: vim sets the list
+            // to the matches, and no matches is an empty list — checked against
+            // `getqflist()` after a `:vimgrep` that found nothing.
+            self.set_places(Vec::new());
+            self.message = format!("E480: No match: {pattern}");
+            return;
+        }
+        let count = places.len();
+        self.set_places(places);
+        if spec.jump {
+            // The walk is what knows how to go to a place in a list, so it is
+            // what goes to the first one — one message style for every list.
+            self.walk_places(true, 0);
+        } else {
+            self.message = format!(
+                "{count} match{} in {files} file{}",
+                if count == 1 { "" } else { "es" },
+                if files == 1 { "" } else { "s" }
+            );
+            self.redraw = true;
+        }
     }
 
     /// Run `:g` or `:v`: a command on every line a pattern matches (or every

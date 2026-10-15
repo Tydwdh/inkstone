@@ -213,26 +213,19 @@ impl Search {
     }
 }
 
-/// Every place `regex` matches in `buffer`, line by line.
+/// Every place `regex` matches in `buffer`, line by line, like [`find`] — with
+/// one difference: a match of nothing at all is a place too.
 ///
-/// Matches do not overlap; the engine decides that, and it is the same rule for
-/// every pattern. A match of nothing at all — `^` on its own — is not collected:
-/// it has no cells to highlight and nowhere for the cursor to go.
-///
-/// What is collected is the part of the match the pattern *reports*, which
-/// `\zs` and `\ze` can make shorter than what the engine matched — that is what
-/// [`Extent`] reads back from the groups those markers became. A pattern
-/// without them is read with `find_iter`, which does not have to remember where
-/// any group landed.
-fn find(buffer: &Buffer, regex: &Regex, extent: &Extent) -> Vec<(usize, usize)> {
+/// It is a place for `:vimgrep`, which records where a match *is* rather than
+/// what it covers, so `:vimgrep /o\zs/` is a list of the positions after every
+/// `o`, which is what vim records as well. A search cannot draw one, and
+/// [`find`] is the one a search uses.
+pub(crate) fn find_places(buffer: &Buffer, regex: &Regex, extent: &Extent) -> Vec<(usize, usize)> {
     let mut found = Vec::new();
     for line in 0..buffer.line_count() {
         let text = buffer.line_string(line);
         let line_start = buffer.line_col_to_char(line, 0);
         let mut keep = |start: usize, end: usize| {
-            if start == end {
-                return;
-            }
             found.push((
                 line_start + text[..start].chars().count(),
                 line_start + text[..end].chars().count(),
@@ -249,6 +242,23 @@ fn find(buffer: &Buffer, regex: &Regex, extent: &Extent) -> Vec<(usize, usize)> 
             }
         }
     }
+    found
+}
+
+/// Every place `regex` matches in `buffer`, line by line.
+///
+/// Matches do not overlap; the engine decides that, and it is the same rule for
+/// every pattern. A match of nothing at all — `^` on its own — is not collected:
+/// it has no cells to highlight and nowhere for the cursor to go.
+///
+/// What is collected is the part of the match the pattern *reports*, which
+/// `\zs` and `\ze` can make shorter than what the engine matched — that is what
+/// [`Extent`] reads back from the groups those markers became. A pattern
+/// without them is read with `find_iter`, which does not have to remember where
+/// any group landed.
+pub(crate) fn find(buffer: &Buffer, regex: &Regex, extent: &Extent) -> Vec<(usize, usize)> {
+    let mut found = find_places(buffer, regex, extent);
+    found.retain(|(start, end)| start != end);
     found
 }
 

@@ -4079,7 +4079,7 @@ fn path_candidates(entry: &Path, name: &str) -> Vec<std::path::PathBuf> {
         .unwrap_or(pattern.len() - 1);
     let base = path_head(&pattern[..wild_at]);
     let mut found = Vec::new();
-    match_directories(&base, &pattern, wild_at, &mut found);
+    match_directories(&base, &pattern, wild_at, Names::Literal, &mut found);
     found
 }
 
@@ -4122,50 +4122,119 @@ fn path_head(parts: &[String]) -> std::path::PathBuf {
 /// Every file `pattern` names, reading it from `depth` on.
 ///
 /// `at` is the directory the components so far land in; `index` is the component
-/// being read. The last component is the file name and is matched literally,
-/// since it came from the buffer rather than from the setting.
-/// Every file `pattern` names, reading it from `index` on, into `out`.
-///
-/// `at` is the directory the components so far land in; `index` is the component
-/// being read. The last component is the file name and is matched literally,
-/// since it came from the buffer rather than from the setting. The results go
-/// into `out` rather than being returned, because the walk calls this once per
-/// directory it reaches: a return value would be dropped by the caller that does
-/// not look at it.
+/// being read. The last component is the file name, and [`Names`] says whether
+/// it is the name as written — a `'path'` lookup, where the pattern is the
+/// directory's and not the file's — or a pattern of its own, which is what a
+/// `:vimgrep` file argument is.
 fn match_directories(
     at: &Path,
     pattern: &[String],
     index: usize,
+    names: Names,
     out: &mut Vec<std::path::PathBuf>,
 ) {
     let Some(part) = pattern.get(index) else {
         return;
     };
     if index + 1 == pattern.len() {
-        let candidate = at.join(part);
-        if candidate.is_file() {
-            out.push(candidate);
+        match names {
+            Names::Literal => {
+                let candidate = at.join(part);
+                if candidate.is_file() {
+                    out.push(candidate);
+                }
+            }
+            Names::Pattern => push_named(at, part, out),
         }
         return;
     }
     if let Some(depth) = starstar_depth(part) {
         // `**`: this directory, and the ones under it, however deep the number
         // allows. `walk_down` visits this directory first, so `**0` is it.
-        walk_down(at, depth, out, index, pattern);
+        walk_down(at, depth, names, out, index, pattern);
         return;
     }
     if part.contains(['*', '?', '[', ']']) {
         for name in names_in(at) {
             if glob_matches(part, &name) {
-                match_directories(&at.join(name), pattern, index + 1, out);
+                match_directories(&at.join(name), pattern, index + 1, names, out);
             }
         }
         return;
     }
     let next = at.join(part);
     if next.is_dir() {
-        match_directories(&next, pattern, index + 1, out);
+        match_directories(&next, pattern, index + 1, names, out);
     }
+}
+
+/// Whether the last component of a path pattern is a name to use as it is, or
+/// one to match against the names in the directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Names {
+    /// `'path'`'s file names: a person typed the name, so it is the name. This
+    /// is vim's rule for `gf` — the wildcards belong to the directory, because
+    /// `'isfname'` has no `*` in it.
+    Literal,
+    /// A whole path, which is what a `:vimgrep` argument is: `src/*.rs` is the
+    /// Rust files in `src`.
+    Pattern,
+}
+
+/// Every file in `dir` that `part` names: `*`, `?` and `[...]` within a name,
+/// and `**` for every file under it.
+fn push_named(dir: &Path, part: &str, out: &mut Vec<std::path::PathBuf>) {
+    if let Some(depth) = starstar_depth(part) {
+        push_files_down(dir, depth, out);
+        return;
+    }
+    for name in names_in(dir) {
+        let candidate = dir.join(&name);
+        if candidate.is_file() && glob_matches(part, &name) {
+            out.push(candidate);
+        }
+    }
+}
+
+/// Every file under `dir`, `depth` levels of directories down.
+fn push_files_down(dir: &Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
+    for name in names_in(dir) {
+        let next = dir.join(&name);
+        if next.is_file() {
+            out.push(next);
+        } else if next.is_dir() && depth > 0 {
+            push_files_down(&next, depth - 1, out);
+        }
+    }
+}
+
+/// Every file a `:vimgrep` argument names.
+///
+/// A plain path is the file itself, and a path with the wildcards `'path'` uses
+/// is expanded from the current directory — with the *name* a pattern too, since
+/// an argument is a whole path rather than a name to look for. The order is the
+/// one the walk reaches, which is by name, so `:cnext` walks a list in a
+/// sensible order.
+pub(crate) fn files_named(argument: &str) -> Vec<std::path::PathBuf> {
+    if !argument.contains(['*', '?', '[', ']']) {
+        return vec![std::path::PathBuf::from(argument)];
+    }
+    let pattern: Vec<String> = std::path::Path::new(argument)
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    let wild_at = pattern
+        .iter()
+        .position(|part| part.contains(['*', '?', '[', ']']))
+        .unwrap_or(0);
+    let mut base = path_head(&pattern[..wild_at]);
+    if base.as_os_str().is_empty() {
+        // A pattern with no directory in it is a pattern in this one.
+        base.push(".");
+    }
+    let mut found = Vec::new();
+    match_directories(&base, &pattern, wild_at, Names::Pattern, &mut found);
+    found
 }
 
 /// Look for the rest of the pattern in `dir` and in every directory under it,
@@ -4173,18 +4242,19 @@ fn match_directories(
 fn walk_down(
     dir: &Path,
     depth: usize,
+    names: Names,
     out: &mut Vec<std::path::PathBuf>,
     index: usize,
     pattern: &[String],
 ) {
-    match_directories(dir, pattern, index + 1, out);
+    match_directories(dir, pattern, index + 1, names, out);
     if depth == 0 {
         return;
     }
     for name in names_in(dir) {
         let next = dir.join(&name);
         if next.is_dir() {
-            walk_down(&next, depth - 1, out, index, pattern);
+            walk_down(&next, depth - 1, names, out, index, pattern);
         }
     }
 }

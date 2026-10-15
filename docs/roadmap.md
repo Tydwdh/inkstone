@@ -3267,6 +3267,43 @@ with: `\i`, `\k`, `\f` and the rest of vim's own classes.
   something the compiled pattern does not have — where the *cursor* is, and which
   line is being looked at.
 
+## Done — `:vimgrep`, and the quickfix-shaped list
+
+The list of places was there — `:copen`, `:cnext`, `:colder` — but the only
+things that filled it were a language server's answers. `:vimgrep` is the search
+that fills it, which is what makes it a quickfix list rather than a thing that
+happens to show places.
+
+- **What shipped:** `:vimgrep /{pattern}/[g][j] {file}...` and its abbreviation
+  `:vim`, the count in front of it, the plain-word form (`:vimgrep TODO *.rs`),
+  and the file arguments with `'path'`'s wildcards — `*`, `?`, `[...]` and `**`.
+  Without `j` the first place is gone to through the same walk `:cnext` uses, so
+  there is one message style for going to a place and one list behind all of it.
+- **Constraints it had to respect, and how:** the pattern is a *search* — the
+  dialect, `\zs` and the classes, and the same `find_places` walk — with one rule
+  of its own from the manual: "'smartcase' is not used", so only `\c`/`\C` and
+  `'ignorecase'` are asked. A pattern the dialect refuses says `E54` here as it
+  does everywhere. The file arguments needed one thing `gf`'s wildcards did not
+  have: the *name* may be a pattern too, since an argument is a whole path
+  rather than a name to look for — `match_directories` now takes a `Names`,
+  `Literal` for `'path'` and `Pattern` for an argument, and `gf`'s own tests are
+  what says the first is unchanged.
+- **What the probing found, and where it changed the design:** three things only
+  the terminal could answer. A failed `:vimgrep` *empties* the list rather than
+  leaving the old one (`getqflist()` after a search that found nothing is empty).
+  A match of nothing is a place — `:vimgrep /o\zs/` records the position *after*
+  each `o` — which a search cannot draw, so the walk that finds places and the
+  walk that finds something to highlight are now two functions with that one
+  difference. And a `:vimgrep` does not become the last search pattern, so `//`
+  after one still means what `/` found.
+- **What is not here:** the `f` flag, which asks for fuzzy matching — a feature
+  of its own — and `'wildignore'`/`'suffixes'`, which are not settings this
+  editor has. A file that cannot be read is skipped rather than reported, which
+  is what vim does in the end: `E480` covers the case where nothing matched.
+- **Files:** `vimgrep.rs` (new: the line's syntax), `command.rs` (`Names`,
+  `files_named`, `push_named`), `search.rs` (`find_places`), `editor/ex.rs`
+  (`run_vimgrep` and the dispatch).
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
@@ -3274,8 +3311,8 @@ modules with new logic in each, that is a sign it should be split.
 
 ### 1. Bigger seams, not yet designed
 
-the quickfix-shaped list window, and the rest of the dialect (`\p`/`\P`, `\@<=`
-and the lookarounds, `\%V`, `\%>l`).
+the rest of the dialect (`\p`/`\P`, `\@<=` and the lookarounds, `\%V`, `\%>l`),
+`'wildignore'` and `'suffixes'` for `:vimgrep`, and fuzzy matching.
 Each one should get its own design note first if it wants to change
 `inkstone-rpc`; the further features are from the protocol, the cheaper they
 are, which is the point of the split. [`rendering.md`](rendering.md) covers

@@ -20,5 +20,6 @@ mod prompt;
 mod registers;
 mod search;
 mod undo;
+mod vimgrep;
 mod visual;
 mod windows;

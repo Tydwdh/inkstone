@@ -70,7 +70,7 @@ impl Global {
         if delimiter.is_alphanumeric() || delimiter == '\\' {
             return Err(SubstituteError::Delimiter(delimiter));
         }
-        let (pattern, command) = split_at(&rest[delimiter.len_utf8()..], delimiter)?;
+        let (pattern, command) = split_at(&rest[delimiter.len_utf8()..], delimiter);
         // The pattern is typed the vim way and compiled the engine's way, the
         // same as `/` and `:s` — which is the one thing this command used not
         // to do, so `:g/\(a\)/d` looked for the characters `(a)`.
@@ -95,8 +95,10 @@ impl Global {
 ///
 /// A backslash escapes the delimiter — which is how a pattern containing the
 /// delimiter is written — and every other escape is left alone, because the
-/// pattern's own dialect has escapes of its own.
-fn split_at(rest: &str, delimiter: char) -> Result<(String, String), SubstituteError> {
+/// pattern's own dialect has escapes of its own. A pattern that is never closed
+/// runs to the end of the line, and vim allows that: `:g/pattern` is a command
+/// with no pattern to close it.
+pub(crate) fn split_at(rest: &str, delimiter: char) -> (String, String) {
     let mut pattern = String::new();
     let mut chars = rest.char_indices();
     while let Some((index, c)) = chars.next() {
@@ -112,13 +114,11 @@ fn split_at(rest: &str, delimiter: char) -> Result<(String, String), SubstituteE
             continue;
         }
         if c == delimiter {
-            return Ok((pattern, rest[index + c.len_utf8()..].to_string()));
+            return (pattern, rest[index + c.len_utf8()..].to_string());
         }
         pattern.push(c);
     }
-    // No closing delimiter: vim allows `:g/pattern` on its own, and takes the
-    // rest of the line as the command — of which there is none.
-    Ok((pattern, String::new()))
+    (pattern, String::new())
 }
 
 #[cfg(test)]

@@ -30,6 +30,18 @@
   share, so both now read `E54: \zs cannot be followed by a multi`.
 
 ### Added
+- `:vimgrep /{pattern}/[g][j] {file}...`, which fills the places list — the one
+  `:copen` shows, `<CR>` goes to a line of and `:cnext` walks — from a search of
+  its own. The pattern is `/`'s, dialect and all, and so are the case rules
+  except that `'smartcase'` is not used, which the manual says of this command
+  alone; `\c` and `\C` settle it over `'ignorecase'`. The files may hold the
+  wildcards `'path'` takes, with the name a pattern too (`src/*.rs`, `**/*.rs`),
+  and a pattern that is a plain word needs no delimiters (`:vimgrep TODO *.rs`
+  is the idiom). `g` makes every match on a line a place of its own, `j` fills
+  the list without going to the first one, a count in front of the command is
+  the most places to find, and `//` is the last pattern a search used. A
+  `:vimgrep` that finds nothing says `E480: No match` and leaves an empty list,
+  as vim's does — it does not leave the list that was there before.
 - Vim's own character classes, written out for the engine: `\i`/`\k` (a name's
   characters), `\I`/`\K` (the same without digits), `\f`/`\F` (a file name's
   characters), `\h` (where a name starts), `\a`, `\l`, `\u` (letters), `\x` and

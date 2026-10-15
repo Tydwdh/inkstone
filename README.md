@@ -33,7 +33,8 @@ insert, `x`, the operators `d`, `y` and `c` with a motion (`dw`, `d$`, `yy`,
 `V`, and a `<C-v>` rectangle, with the same operators), registers (`p`, `P`,
 `"ayy`, `"ap`, `"_dd`, `"0p`, `"+y`, `:reg`), search (`/`, `?`, `n`, `N`, `*`,
 `#`, with every match highlighted) and regular-expression replace (`:s`,
-`:%s`, with ranges, `:&` and the `c` flag) in vim's own pattern dialect, syntax
+`:%s`, with ranges, `:&` and the `c` flag) in vim's own pattern dialect,
+`:vimgrep` to search a project and fill the list of places, syntax
 highlighting for Rust, the C family, Python, shells, TOML/YAML/INI, JSON,
 Markdown and HTML (fenced blocks and `<script>` bodies in their own language),
 undo (`u`) and redo (`<C-r>`), with the state a file was written in remembered
@@ -677,6 +678,16 @@ line names and closes the window, `:cclose` just closes it — taking the list's
 document with it, so a session that opens a hundred lists is not carrying a hundred
 scratch documents in `:ls` — and the list is not for editing — and `:cnext` and `:cprev` walk it — opening another file when a place is in one — and a count walks
 that many at once. It stops at either end rather than wrapping.
+
+`vimgrep /{pattern}/[g][j] {file}...` fills that list from a search of its own:
+the files may hold the wildcards `'path'` takes (`src/*.rs`, `**/*.rs`), a
+pattern that is a plain word needs no delimiters around it (`:vimgrep TODO
+*.rs`), `g` makes every match on a line a place of its own, and `j` fills the
+list without going to the first one. A count in front of the command is the most
+places to find, `//` is the last pattern a search used, and nothing found is
+`E480` with an empty list rather than the one that was there before. The
+pattern, the dialect and the case rules are a search's — except that
+`'smartcase'` is not used, which is what the manual says of this command alone.
 
 `format` asks a language server to lay the file out — `textDocument/formatting`, or
 `:{range}format` for part of it —

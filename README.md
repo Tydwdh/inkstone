@@ -57,8 +57,10 @@ the pointer (or, on a bracket, everything up to its pair), triple takes the line
 quadruple takes a rectangular block — and a drag after a double click takes whole
 words, until the button comes up.
 
-Not implemented: vim's character classes for identifiers and file names (`\i`,
-`\k`), which are left to the engine to refuse rather than translated.
+Not implemented: `\p` and `\P`, vim's "printable" class, which is byte-oriented
+in vim's own engine — it counts a CJK character as printable and a Greek one as
+not — and so has no meaning worth copying here; and `\@<=` and the lookarounds,
+which the regex engine has no way to say.
 [`docs/roadmap.md`](docs/roadmap.md) lists the rest, with what each thing would
 have to respect.
 
@@ -478,7 +480,16 @@ none-or-one, `\{2,3}` is a count and `\{-2,3}` the same count taken as few
 times as possible, `\<` and `\>` are the ends of a word, and `\c` and `\C`
 ask for case-insensitivity or refuse it — wherever they are in the pattern, and
 over the `i` flag if both say something. `\v` and `\V` switch everything magic
-on and off, the first being what the engine already does. The rest is shared
+on and off, the first being what the engine already does. Vim's own character
+classes are there too, written out for the engine: `\k` and `\i` are a name's
+characters (letters, numbers and `_`), `\I` and `\K` the same without digits,
+`\f` and `\F` a file name's characters, `\h` where a name starts, `\a`, `\l` and
+`\u` for letters, `\x` and `\o` for hex and octal digits, and `\H`, `\A`, `\L`,
+`\U`, `\X` and `\O` for the characters those do not match. Vim builds them out
+of `'isident'`, `'iskeyword'` and `'isfname'`, which are not settings here, so
+they are those options' defaults, and they are Unicode-aware where vim's engine
+counts bytes — `\k` finds a name in `héllo` because that is what the highlighter
+already calls a name. The rest is shared
 ground: `.` and `*`, `\d` and `\w` and `\s`, `[a-z]`, `^` and `$` for the ends
 of a *line* — since a pattern is matched within a line and can never match a line
 break — all mean what they look like. `:s` replaces what one finds, and every group reference in its

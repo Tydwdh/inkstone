@@ -14,6 +14,14 @@
 //! | `\{-n,m}` | `{n,m}?` | a count, as few as possible |
 //! | `\<` `\>` | `\b` | the start or end of a word |
 //! | `\zs` `\ze` | `()` | where the match starts and ends |
+//! | `\i` `\k` | `[\p{Alphabetic}\p{N}_]` | a name's characters |
+//! | `\I` `\K` | `[\p{Alphabetic}_]` | the same, without digits |
+//! | `\f` | `[\p{Alphabetic}\p{N}_/.+,\-#$%~=]` | a file name's characters |
+//! | `\F` | `[\p{Alphabetic}_/.+,\-#$%~=]` | the same, without digits |
+//! | `\h` | `[\p{Alphabetic}_]` | the head of a name |
+//! | `\a` `\l` `\u` | `\p{Alphabetic}` `\p{Ll}` `\p{Lu}` | letters |
+//! | `\x` `\o` | `[0-9A-Fa-f]` `[0-7]` | hex and octal digits |
+//! | `\H` `\A` `\L` `\U` `\X` `\O` | the characters those do not match | |
 //! | `\c` `\C` | — | ignore case, or do not |
 //! | `\v` | — | everything is magic, which the engine already is |
 //! | `\V` | — | nothing is magic |
@@ -25,13 +33,21 @@
 //! landed — [`Extent`] is that reading, and it is what makes `:s/a\zsb/X/`
 //! replace the `b`.
 //!
-//! Everything else is left exactly as it was: `.` and `*` are as magic in one
-//! as in the other, `\d` and `\w` mean the same thing in both, and an escaped
-//! literal — `\.`, `\*` — is an escaped literal in both.
+//! Vim's own character classes are built out of options (`'isident'`,
+//! `'iskeyword'`, `'isfname'`) that this editor does not have, so what is here
+//! is those options' defaults, written out as classes. Vim's engine is
+//! byte-oriented there and this one is not: `\i` is every Unicode letter or
+//! number, which is what the highlighter already calls a name.
 //!
-//! What is *not* here: vim's character classes for identifiers and file names
-//! (`\i`, `\k`, `\f`), which the engine spells as Unicode classes and a person
-//! can write out.
+//! Everything else is left exactly as it was: `.` and `*` are as magic in one
+//! as in the other, `\d` and `\w` are the engine's own Unicode sets, an escaped
+//! literal — `\.`, `\*` — is an escaped literal in both, and `\b` is the
+//! engine's word boundary rather than vim's backspace, which is the useful
+//! reading of it and not vim's.
+//!
+//! What is *not* here: `\p` and `\P`, vim's "printable" class, which is
+//! byte-oriented in vim's own engine — it counts a CJK character as printable
+//! and a Greek one as not — and so has no meaning worth copying here.
 
 /// What a pattern asked for that cannot be done here.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -252,9 +268,18 @@ pub(crate) fn translate(input: &str) -> Result<Pattern, DialectError> {
                     extent.ends.push(groups);
                 }
             }
-            // `\i` and its relatives are not here either: the engine would read
-            // them as an escape it does not know and fail, which is a better
-            // answer than matching something else.
+            // Vim's own character classes — `\i`, `\k`, `\f`, `\h`, `\a`, `\l`,
+            // `\u`, `\x`, `\o` and their relatives — have no spelling of their
+            // own in the engine, which would read each of them as an escape it
+            // does not know and fail. They are written out instead: the engine
+            // knows the same characters under the same properties.
+            'i' | 'I' | 'k' | 'K' | 'f' | 'F' | 'h' | 'H' | 'a' | 'A' | 'l' | 'L' | 'u' | 'U'
+            | 'x' | 'X' | 'o' | 'O' => {
+                out.push_str(character_class(next));
+            }
+            // Anything else is left as it is: an escape the engine does not
+            // know fails to compile, which is a better answer than matching
+            // something else quietly.
             other => {
                 out.push('\\');
                 out.push(other);
@@ -266,6 +291,46 @@ pub(crate) fn translate(input: &str) -> Result<Pattern, DialectError> {
         ignore_case,
         extent,
     })
+}
+
+/// Vim's own character classes, in the engine's spelling.
+///
+/// Vim builds these out of options — `'isident'`, `'iskeyword'`, `'isfname'` —
+/// which this editor does not have, so what is here is those options' *defaults*
+/// as vim documents them: `\i` and `\k` are the same set (`@,48-57,_,192-255`
+/// with `@` meaning the letters), `\f` adds the punctuation a path is made of,
+/// and `\h` is a name's first character.
+///
+/// Where vim's own engine is byte-oriented — a "letter" is `[A-Za-z]` plus the
+/// bytes above 127 — these are the engine's Unicode sets instead, which is what
+/// `\d` and `\w` already meant here. A pattern that wants a narrower set of
+/// characters writes the class out.
+///
+/// The capital letters are not always the opposite: `\I`, `\K` and `\F` are
+/// "like the same letter, but excluding digits", while `\A`, `\L`, `\U`, `\H`,
+/// `\X` and `\O` are what vim's manual says they are — the characters the
+/// lowercase form does *not* match.
+fn character_class(escape: char) -> &'static str {
+    match escape {
+        'i' | 'k' => "[\\p{Alphabetic}\\p{N}_]",
+        'I' | 'K' => "[\\p{Alphabetic}_]",
+        'f' => "[\\p{Alphabetic}\\p{N}_/.+,\\-#$%~=]",
+        'F' => "[\\p{Alphabetic}_/.+,\\-#$%~=]",
+        'h' => "[\\p{Alphabetic}_]",
+        'H' => "[^\\p{Alphabetic}_]",
+        'a' => "\\p{Alphabetic}",
+        'A' => "\\P{Alphabetic}",
+        'l' => "\\p{Ll}",
+        'L' => "\\P{Ll}",
+        'u' => "\\p{Lu}",
+        'U' => "\\P{Lu}",
+        'x' => "[0-9A-Fa-f]",
+        'X' => "[^0-9A-Fa-f]",
+        'o' => "[0-7]",
+        'O' => "[^0-7]",
+        // Nothing else reaches here: the caller matches the escapes above.
+        _ => unreachable!("not a character class"),
+    }
 }
 
 /// Whether a multi — `*`, `\+`, `\?` or `\{n,m}` — follows.
@@ -414,6 +479,39 @@ mod tests {
         let plain = translate("\\(a\\)\\(b\\)").expect("translated");
         assert_eq!(plain.extent.group(2), 2, "and nothing moved");
         assert!(plain.extent.is_empty());
+    }
+
+    #[test]
+    fn vims_character_classes_are_written_out_for_the_engine() {
+        // Vim builds these from `'isident'`, `'iskeyword'` and `'isfname'`,
+        // which are not settings here: they are the options' defaults, in the
+        // engine's spelling. The capital letters are not all opposites — `\I`
+        // is "like `\i`, but excluding digits" — and the test says which is
+        // which, because that is the kind of thing a reading of the manual
+        // gets wrong.
+        assert_eq!(pattern("\\i"), "[\\p{Alphabetic}\\p{N}_]");
+        assert_eq!(pattern("\\k"), "[\\p{Alphabetic}\\p{N}_]");
+        assert_eq!(pattern("\\I"), "[\\p{Alphabetic}_]");
+        assert_eq!(pattern("\\K"), "[\\p{Alphabetic}_]");
+        assert_eq!(pattern("\\f"), "[\\p{Alphabetic}\\p{N}_/.+,\\-#$%~=]");
+        assert_eq!(pattern("\\F"), "[\\p{Alphabetic}_/.+,\\-#$%~=]");
+        assert_eq!(pattern("\\h"), "[\\p{Alphabetic}_]");
+        assert_eq!(pattern("\\a"), "\\p{Alphabetic}");
+        assert_eq!(pattern("\\l"), "\\p{Ll}");
+        assert_eq!(pattern("\\u"), "\\p{Lu}");
+        assert_eq!(pattern("\\x"), "[0-9A-Fa-f]");
+        assert_eq!(pattern("\\o"), "[0-7]");
+        // The opposites are the opposites of *those*, not "without digits".
+        assert_eq!(pattern("\\H"), "[^\\p{Alphabetic}_]");
+        assert_eq!(pattern("\\A"), "\\P{Alphabetic}");
+        assert_eq!(pattern("\\L"), "\\P{Ll}");
+        assert_eq!(pattern("\\U"), "\\P{Lu}");
+        assert_eq!(pattern("\\X"), "[^0-9A-Fa-f]");
+        assert_eq!(pattern("\\O"), "[^0-7]");
+        // And under `\V` a class is the character it looks like, as with
+        // everything else there.
+        assert_eq!(pattern("\\V\\i"), "i");
+        assert_eq!(pattern("\\V\\x2"), "x2");
     }
 
     #[test]

@@ -30,6 +30,16 @@
   share, so both now read `E54: \zs cannot be followed by a multi`.
 
 ### Added
+- Vim's own character classes, written out for the engine: `\i`/`\k` (a name's
+  characters), `\I`/`\K` (the same without digits), `\f`/`\F` (a file name's
+  characters), `\h` (where a name starts), `\a`, `\l`, `\u` (letters), `\x` and
+  `\o` (hex and octal digits), and `\H`, `\A`, `\L`, `\U`, `\X`, `\O` for the
+  characters those do not match. Vim builds the first six out of `'isident'`,
+  `'iskeyword'` and `'isfname'`, which are not settings here, so they are those
+  options' defaults; and where vim's engine counts bytes these are Unicode, which
+  is what `\d` and `\w` already meant here — `\k` finds a name in `héllo`,
+  because that is what the highlighter already calls a name. `\A` no longer means
+  the engine's start-of-text anchor by accident.
 - `\zs` and `\ze` in a pattern, which "set the start and end of the match": each
   becomes an empty group where it matched, and the part of a match the pattern
   *reports* — the cells a search highlights and the text `:s` replaces — is read

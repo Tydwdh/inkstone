@@ -3230,6 +3230,43 @@ character for character, while `/` and `:s` put it through `dialect` first.
 - **Left for later:** nothing; the dialect is now the same everywhere a pattern is
   typed.
 
+## Done — vim's character classes
+
+The last of the README's "not implemented" list that a pattern can be written
+with: `\i`, `\k`, `\f` and the rest of vim's own classes.
+
+- **What shipped:** `\i`/`\k` (a name's characters), `\I`/`\K` (the same without
+  digits), `\f`/`\F` (a file name's characters), `\h` (where a name starts),
+  `\a`/`\l`/`\u` (letters), `\x`/`\o` (hex and octal digits), and
+  `\H`/`\A`/`\L`/`\U`/`\X`/`\O` for the characters those do not match. Each is
+  written out as the engine's class, since the engine has no spelling of its own
+  for any of them and used to fail to compile the pattern.
+- **Constraints it had to respect, and how:** vim builds `\i`, `\k` and `\f` out
+  of `'isident'`, `'iskeyword'` and `'isfname'`, and this editor has none of
+  those settings — so what is here are those options' *defaults*, measured from
+  `vim -es` before they were written down. Where vim's engine counts bytes, these
+  are the engine's Unicode classes, which is what `\d` and `\w` already meant
+  here and what the highlighter calls a name: `\k` finds `héllo` where vim would
+  stop at the `é`.
+- **The trap the capital letters are:** for `\h`, `\a`, `\l`, `\u`, `\x` and
+  `\o` the capital is the *opposite* — `\H` is "not a name's first character" —
+  while for `\i`, `\k` and `\f` it is "the same, without digits". Both are vim's
+  own rule and the two are one letter apart, which is why the test says which is
+  which.
+- **What this fixed without meaning to:** `\A` used to reach the engine as its
+  start-of-text anchor, so `/a\A/` matched nothing at all rather than "a" and a
+  non-letter.
+- **What is still out:** `\p` and `\P`, vim's "printable" class. It is
+  byte-oriented in vim's own engine — the probe found it counting a CJK character
+  as printable and a Greek one as not, and `\P` behaving as `\D` — so there is no
+  meaning there to copy.
+- **Files:** `inkstone-core` (`dialect.rs`: `character_class`, the escape arm,
+  the module's table; tests in `dialect.rs` and `search.rs`).
+- **Left for later:** the lookarounds (`\@=`, `\@<=`, `\@!`, `\@<!`), which the
+  regex engine cannot say at all, and `\%V` and `\%>l`/`\%<l`, which need
+  something the compiled pattern does not have — where the *cursor* is, and which
+  line is being looked at.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
@@ -3237,8 +3274,8 @@ modules with new logic in each, that is a sign it should be split.
 
 ### 1. Bigger seams, not yet designed
 
-the quickfix-shaped list window, and the rest of the dialect (`\i`, `\k`, `\f`,
-`\@<=` and the lookarounds, `\%V`, `\%>l`).
+the quickfix-shaped list window, and the rest of the dialect (`\p`/`\P`, `\@<=`
+and the lookarounds, `\%V`, `\%>l`).
 Each one should get its own design note first if it wants to change
 `inkstone-rpc`; the further features are from the protocol, the cheaper they
 are, which is the point of the split. [`rendering.md`](rendering.md) covers

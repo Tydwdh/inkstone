@@ -469,6 +469,40 @@ mod tests {
     }
 
     #[test]
+    fn vims_character_classes_match_the_characters_they_name() {
+        // `\k` and `\i` are a name's characters, `\I` and `\K` the same
+        // without digits, and `\h` is where a name starts.
+        assert_eq!(
+            matches_of("a1 b_2\n", "\\k\\+", false),
+            vec![(0, 2), (3, 6)],
+            "two names"
+        );
+        assert_eq!(matches_of("a1 23\n", "\\I\\+", false), vec![(0, 1)]);
+        assert_eq!(
+            matches_of("a1 _x\n", "\\h\\k\\+", false),
+            vec![(0, 2), (3, 5)]
+        );
+        // A Unicode name is a name: the rule the highlighter uses, and the
+        // reason these are the engine's classes and not vim's bytes.
+        assert_eq!(matches_of("héllo!\n", "\\k\\+", false), vec![(0, 5)]);
+        // `\a` is a letter and `\A` is what a letter is not — the engine's own
+        // `\A` is the start of the text, which is what this used to mean.
+        assert_eq!(matches_of("ab\n", "\\a\\+", false), vec![(0, 2)]);
+        assert_eq!(matches_of("a1\n", "\\A", false), vec![(1, 2)]);
+        assert_eq!(matches_of("aBc\n", "\\l\\+", false), vec![(0, 1), (2, 3)]);
+        assert_eq!(matches_of("aBc\n", "\\u\\+", false), vec![(1, 2)]);
+        // Hex and octal digits are ASCII, and where the run stops says so.
+        assert_eq!(matches_of("f0g\n", "\\x\\+", false), vec![(0, 2)]);
+        assert_eq!(matches_of("0719\n", "\\o\\+", false), vec![(0, 3)]);
+        // A file name's characters are what a path is made of.
+        assert_eq!(
+            matches_of("../a-b.c\n", "\\f\\+", false),
+            vec![(0, 8)],
+            "the whole path"
+        );
+    }
+
+    #[test]
     fn a_pattern_that_does_not_compile_says_why() {
         let mut search = Search::new();
         let error = search

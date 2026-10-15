@@ -679,11 +679,18 @@ document with it, so a session that opens a hundred lists is not carrying a hund
 scratch documents in `:ls` — and the list is not for editing — and `:cnext` and `:cprev` walk it — opening another file when a place is in one — and a count walks
 that many at once. It stops at either end rather than wrapping.
 
-`vimgrep /{pattern}/[g][j] {file}...` fills that list from a search of its own:
+`vimgrep /{pattern}/[g][j][f] {file}...` fills that list from a search of its own:
 the files may hold the wildcards `'path'` takes (`src/*.rs`, `**/*.rs`), a
 pattern that is a plain word needs no delimiters around it (`:vimgrep TODO
-*.rs`), `g` makes every match on a line a place of its own, and `j` fills the
-list without going to the first one. A count in front of the command is the most
+*.rs`), `g` makes every match on a line a place of its own, `j` fills the
+list without going to the first one, and `f` makes the pattern *fuzzy* — its
+characters have to be in the line and in order, but not next to each other, so
+`:vimgrep /rdme/f **` finds `README` and `read_me` and `r a d m e`. A fuzzy
+pattern is a literal string rather than a regular expression, a capital in it
+wants a capital (`Rdme` does not find `read_me`), several words are each found
+somewhere, and the place that comes back is the best-scoring one rather than the
+first — the algorithm is fzy's, which is what vim's own fuzzy matching is built
+on. A count in front of the command is the most
 places to find, `//` is the last pattern a search used, and nothing found is
 `E480` with an empty list rather than the one that was there before. The
 pattern, the dialect and the case rules are a search's — except that

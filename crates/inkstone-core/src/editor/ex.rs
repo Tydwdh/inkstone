@@ -579,6 +579,8 @@ impl Editor {
         }
         // "'smartcase' is not used" is the manual's own line about this command,
         // so only a `\c` or `\C` in the pattern and `'ignorecase'` are asked.
+        // A fuzzy pattern is a literal string, so none of this applies to it and
+        // there is nothing to compile.
         let ignore_case = spec
             .ignore_case
             .unwrap_or_else(|| self.options.borrow().ignorecase);
@@ -589,12 +591,15 @@ impl Editor {
                 return;
             }
         };
-        let compiled = match regex::RegexBuilder::new(&translated.pattern)
-            .case_insensitive(ignore_case)
-            .build()
-        {
-            Ok(compiled) => compiled,
-            Err(error) => {
+        let compiled = match (
+            spec.fuzzy,
+            regex::RegexBuilder::new(&translated.pattern)
+                .case_insensitive(ignore_case)
+                .build(),
+        ) {
+            (true, _) => None,
+            (false, Ok(compiled)) => Some(compiled),
+            (false, Err(error)) => {
                 self.message = format!("E54: {error}");
                 return;
             }
@@ -648,7 +653,24 @@ impl Editor {
             let buffer = Buffer::from_text(&text);
             let mut asked = None;
             let mut here = 0;
-            for (start, _) in crate::search::find_places(&buffer, &compiled, &translated.extent) {
+            // Where the matches are, as character offsets. A fuzzy pattern has
+            // one place a line — the best one — and nothing compiled to walk
+            // with; a regular expression is the same walk a search uses.
+            let found: Vec<usize> = if let Some(compiled) = &compiled {
+                crate::search::find_places(&buffer, compiled, &translated.extent)
+                    .into_iter()
+                    .map(|(start, _)| start)
+                    .collect()
+            } else {
+                (0..buffer.line_count())
+                    .filter_map(|row| {
+                        let line = buffer.line_string(row);
+                        let at = crate::fuzzy::match_start(&line, &pattern)?;
+                        Some(buffer.line_col_to_char(row, at))
+                    })
+                    .collect()
+            };
+            for start in found {
                 let (row, col) = buffer.char_to_line_col(start);
                 // Without `g` a line is a place of its own once, however often
                 // the pattern matches in it.

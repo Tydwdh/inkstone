@@ -37,6 +37,18 @@
   share, so both now read `E54: \zs cannot be followed by a multi`.
 
 ### Added
+- `:vimgrep`'s `f` flag, which makes the pattern *fuzzy*: its characters have to
+  be in the line and in order, but not next to each other, and the pattern is a
+  literal string rather than a regular expression — so `:vimgrep /rdme/f **`
+  finds `README`, `read_me` and `r a d m e`, and `a.c` is a pattern with a dot
+  in it rather than "any character". Several words are each found somewhere in
+  the line and in any order, a capital in the pattern wants a capital, and the
+  place the list records is the *best-scoring* one rather than the first, since
+  the point of fuzzy matching is that the match you meant is the one that looks
+  best. The scoring is fzy's, which is what vim's own fuzzy matching is built
+  on, and every rule above was measured against vim rather than read off the
+  manual: the four sentences about it are one paragraph of `pattern.txt`, and the
+  columns a fuzzy `:vimgrep` reports are what `getqflist()` says.
 - `'wildignore'` and `'suffixes'`, the two settings `:vimgrep` wanted: a file
   that matches a `'wildignore'` pattern is left out of a search whether a
   wildcard found it or the argument named it (a pattern with a separator in it is

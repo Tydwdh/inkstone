@@ -339,7 +339,6 @@ and ignored — a config typo must not stop the editor from opening.
 | `E683: File name missing or invalid pattern` | a `:vimgrep` with no pattern, or with no files to look in |
 | `E481: No range allowed` | `:1,5vimgrep`: the number in front of the command is a count of places to find, and a comma would mean a range |
 | `E480: No match: X` | a `:vimgrep` that found nothing in any of its files; the list is emptied |
-| `fuzzy matching is not implemented` | the `f` flag of `:vimgrep` |
 | `N matches in M files` | a `:vimgrep` with `j`: the list is filled and the cursor stays put |
 | `{index} of {count}: {path}` | going to a place in a list: `:cnext`, `<CR>` in a list window, or the first place a `:vimgrep` found |
 | `E784: Cannot close last tab page` | `:tabclose` with one tab |

@@ -3370,6 +3370,42 @@ a search of a project worth anything: without it, `:vimgrep /x/ **/*.rs` walks
   `written`, `files_named`), `editor/ex.rs` (`run_vimgrep` gathers and orders the
   files before it reads any of them).
 
+## Done — fuzzy matching for `:vimgrep`
+
+The `f` flag, which was refused with "fuzzy matching is not implemented" — the
+last thing the `:vimgrep` entry left for later.
+
+- **What shipped:** `f` makes the pattern fuzzy: its characters have to be in the
+  line and in order, but not next to each other, and it is a *literal string*
+  rather than a regular expression — so nothing is translated and a `[` in it is
+  a `[`. `:vimgrep /rdme/f **` finds `README`, `read_me` and `r a d m e`.
+- **What the rules turned out to be:** the manual gives four sentences, and the
+  rest had to be measured. A capital in the pattern wants a capital and
+  everything else folds, *one character at a time* — `/Get/f` finds `GETPAT` and
+  `GetPat` but not `getpat`, which the manual's "case is ignored if the pattern is
+  all lower case" does not quite say. Several words are each matched anywhere and
+  in any order, and they may overlap (`/a a/f` is happy with one `a`), and the
+  place that comes back is the *first* word's best match — the terminal showed
+  that on `PatternGet`, where `/get pat/f` reports the `Get` at the end rather
+  than the `Pat` at the start. And the place itself is the best-scoring one, not
+  the leftmost: `/abc/f` on `xabc a_bc` reports the *second* match.
+- **Where the scoring came from, and how it was checked:** vim's fuzzy matching
+  is fzy's algorithm (`pattern.txt` says so), so the dynamic programming, the
+  backward pass and the bonus table are fzy's — with the camelCase rule as fzy's
+  own source has it, and *without* the odd "a lower-case letter after a
+  lower-case letter is capital" entry that the generated table in that repository
+  still carries. The test for all of this is not a reading but 9234 measured
+  answers: five rounds of probes wrote files, ran `:vimgrep /.../f` under
+  `vim -es` and read `getqflist()` back, and the Rust tests and the scoring both
+  had to reproduce every one of those columns. Two of them are in `fuzzy.rs` as
+  the examples they came from.
+- **The one place it is not vim's:** `g` ("every match is added") changes nothing
+  for a fuzzy pattern — what it finds is the one best place in the line — and
+  that is written down rather than left to be discovered.
+- **Files:** `fuzzy.rs` (new: the matcher), `vimgrep.rs` (the flag, and the
+  literal pattern that is not translated), `editor/ex.rs` (the walk, which is one
+  place a line for fuzzy and `find_places` for a pattern).
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
@@ -3377,8 +3413,7 @@ modules with new logic in each, that is a sign it should be split.
 
 ### 1. Bigger seams, not yet designed
 
-the rest of the dialect (`\p`/`\P`, `\@<=` and the lookarounds, `\%V`, `\%>l`)
-and fuzzy matching for `:vimgrep`'s `f` flag.
+the rest of the dialect (`\p`/`\P`, `\@<=` and the lookarounds, `\%V`, `\%>l`).
 Each one should get its own design note first if it wants to change
 `inkstone-rpc`; the further features are from the protocol, the cheaper they
 are, which is the point of the split. [`rendering.md`](rendering.md) covers

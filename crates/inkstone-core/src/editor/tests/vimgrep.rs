@@ -264,6 +264,59 @@ fn a_suffixed_file_is_searched_last() {
 }
 
 #[test]
+fn a_fuzzy_pattern_matches_characters_in_order() {
+    let dir = scratch(
+        "fuzzy",
+        &[
+            (
+                "a.txt",
+                "README\nread_me\nr a d m e\nno match here\nxxREADME again\n",
+            ),
+            ("dots.txt", "ax.c\nabc\n"),
+        ],
+    );
+    let a = dir.join("a.txt");
+
+    let mut ed = Editor::for_tests();
+    ed.execute_cmdline(&format!("vimgrep /rdme/fj {}", a.display()));
+    // The lines and the columns are vim's own answers, from `getqflist()`: the
+    // fuzzy match is the *best* one in the line, not the leftmost.
+    assert_eq!(
+        ed.places
+            .iter()
+            .map(|place| (place.1 + 1, place.2 + 1))
+            .collect::<Vec<_>>(),
+        vec![(1, 1), (2, 1), (3, 1), (5, 3)],
+        "README, read_me, `r a d m e`, and the one after `xx`"
+    );
+    assert_eq!(ed.message, "4 matches in 1 file");
+
+    // `g` asks for every match on a line, and a fuzzy pattern has one: the best
+    // one. So it changes nothing here.
+    ed.execute_cmdline(&format!("vimgrep /rdme/fgj {}", a.display()));
+    assert_eq!(ed.places.len(), 4);
+
+    // A capital in the pattern wants a capital: `Rdme` finds `README` and not
+    // `read_me`, which is the rule the terminal showed.
+    ed.execute_cmdline(&format!("vimgrep /Rdme/fj {}", a.display()));
+    assert_eq!(
+        ed.places.iter().map(|place| place.1).collect::<Vec<_>>(),
+        vec![0, 4],
+        "the two lines with a capital R"
+    );
+
+    // The pattern is a *literal string* rather than a regular expression: the
+    // `.` stands for itself, so `a.c` finds `ax.c` and not `abc`.
+    let dots = dir.join("dots.txt");
+    ed.execute_cmdline(&format!("vimgrep /a.c/fj {}", dots.display()));
+    assert_eq!(ed.places.len(), 1, "one of the two lines");
+    assert_eq!((ed.places[0].1, ed.places[0].2), (0, 0), "the `ax.c`");
+    // hmm: "abc" would match if the dot were "any character".
+    ed.execute_cmdline(&format!("vimgrep /a.c/j {}", dots.display()));
+    assert_eq!(ed.places.len(), 1, "and the dot is still a dot");
+}
+
+#[test]
 fn an_empty_pattern_is_the_last_search_and_the_last_search_is_not_replaced() {
     let dir = scratch("last", &[("a.txt", "one\nthree\n")]);
     let a = dir.join("a.txt");

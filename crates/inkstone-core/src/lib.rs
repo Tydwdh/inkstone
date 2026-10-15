@@ -18,6 +18,7 @@ pub mod cursor;
 pub mod diagnostic;
 mod dialect;
 mod editor;
+mod fuzzy;
 mod global;
 pub mod highlight;
 pub mod history;

@@ -1,7 +1,7 @@
 //! `:vimgrep` — every place a pattern matches, in the list.
 //!
 //! ```text
-//! [count]vim[grep][!] /{pattern}/[g][j] {file}...
+//! [count]vim[grep][!] /{pattern}/[g][j][f] {file}...
 //! [count]vim[grep][!] {pattern} {file}...
 //! ```
 //!
@@ -24,7 +24,12 @@
 //! - An empty pattern (`//`) is the last one a search used, and the pattern a
 //!   `:vimgrep` was given does *not* become the last one.
 //! - Without `g` a line is a place of its own once, however often it matches;
-//!   with `g` every match is a place.
+//!   with `g` every match is a place. A *fuzzy* pattern has one place a line
+//!   whatever the flags say, since what it finds is the best one place in it.
+//! - `f` makes the pattern fuzzy: "the characters in {pattern} must appear in
+//!   order, but need not be next to each other. In this case, {pattern} is
+//!   treated as a literal string instead of a regular expression" — and the place
+//!   that comes back is the best-scoring one, which is `fuzzy.rs`'s business.
 //! - `j` leaves the cursor where it is; without it the first place is gone to.
 //! - A count in front of the command is the most places to find.
 //! - The files may hold the wildcards `'path'` uses for `gf` — `*`, `?`, `[...]`
@@ -49,6 +54,10 @@ pub(crate) struct Vimgrep {
     pub(crate) all: bool,
     /// Whether to go to the first place (`j` says not to).
     pub(crate) jump: bool,
+    /// Whether the pattern is *fuzzy* (`f`): its characters have to be in the
+    /// line and in order, but not next to each other, and it is a literal string
+    /// rather than a regular expression.
+    pub(crate) fuzzy: bool,
     /// The most places to find, from a count in front of the command.
     pub(crate) limit: Option<usize>,
     /// The files to look in, as they were typed.
@@ -69,9 +78,6 @@ pub(crate) enum VimgrepError {
     /// A flag that is not one of vim's.
     #[error("E488: Trailing characters: {0}")]
     Flag(char),
-    /// `f`, which asks for fuzzy matching: vim has it, this editor does not.
-    #[error("fuzzy matching is not implemented")]
-    Fuzzy,
     /// A pattern that asks for something the dialect cannot do.
     #[error("E54: {0}")]
     Dialect(crate::dialect::DialectError),
@@ -117,18 +123,33 @@ impl Vimgrep {
             let files = after[flags.len()..].to_string();
             (pattern, flags, files)
         };
-        let (mut all, mut jump) = (false, true);
+        let (mut all, mut jump, mut fuzzy) = (false, true, false);
         for flag in flags.chars() {
             match flag {
                 'g' => all = true,
                 'j' => jump = false,
-                'f' => return Err(VimgrepError::Fuzzy),
+                'f' => fuzzy = true,
                 other => return Err(VimgrepError::Flag(other)),
             }
         }
         let files: Vec<String> = files.split_whitespace().map(str::to_string).collect();
         if files.is_empty() {
             return Err(VimgrepError::Argument);
+        }
+        // `f` makes the pattern a *literal string* — "in this case, {pattern} is
+        // treated as a literal string instead of a regular expression" — so it is
+        // not translated, not compiled, and not refused: a `[` in it is a `[`.
+        if fuzzy {
+            return Ok(Self {
+                pattern,
+                translated: String::new(),
+                ignore_case: None,
+                all,
+                jump,
+                fuzzy,
+                limit,
+                files,
+            });
         }
         let translated = crate::dialect::translate(&pattern).map_err(VimgrepError::Dialect)?;
         Ok(Self {
@@ -137,6 +158,7 @@ impl Vimgrep {
             ignore_case: translated.ignore_case,
             all,
             jump,
+            fuzzy,
             limit,
             files,
         })
@@ -252,6 +274,24 @@ mod tests {
         assert_eq!(spec.pattern, "\\cone");
         assert_eq!(spec.translated, "one");
         assert_eq!(spec.ignore_case, Some(true));
+
+        // `f` makes the pattern a literal string: nothing is translated, so a
+        // pattern the dialect would refuse is simply a pattern.
+        let spec = Vimgrep::parse("vimgrep /[\\zs]/f a.txt").expect("parses");
+        assert!(spec.fuzzy);
+        assert_eq!(spec.pattern, "[\\zs]");
+        assert_eq!(spec.translated, "");
+        assert_eq!(spec.ignore_case, None);
+        assert!(
+            Vimgrep::parse("vimgrep /one/fj a.txt")
+                .expect("parses")
+                .fuzzy
+        );
+        assert!(
+            !Vimgrep::parse("vimgrep /one/fj a.txt")
+                .expect("parses")
+                .jump
+        );
     }
 
     #[test]
@@ -272,11 +312,6 @@ mod tests {
         assert_eq!(
             Vimgrep::parse("vimgrep /one/x a.txt").unwrap_err(),
             VimgrepError::Flag('x')
-        );
-        assert_eq!(
-            Vimgrep::parse("vimgrep /one/f a.txt").unwrap_err(),
-            VimgrepError::Fuzzy,
-            "fuzzy matching is a feature of its own"
         );
         assert_eq!(
             Vimgrep::parse("1,5vimgrep /one/ a.txt").unwrap_err(),

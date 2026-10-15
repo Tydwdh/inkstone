@@ -233,6 +233,19 @@ settings! {
     /// open: a comma-separated list of directories, searched in order. Empty by
     /// default, as in vim.
     Path as path: PathList = PathList(Vec::new()),
+    /// File patterns `:vimgrep` does not look at, as a comma-separated list: "a
+    /// file that matches with one of these patterns is ignored". A pattern with
+    /// a separator in it is matched against the whole path — which is what makes
+    /// `target/*` keep a build tree out of a search — and one without against
+    /// the file's own name. A `*` stands for any run of characters, separators
+    /// included, and either kind of separator may be written. Empty by default,
+    /// as in vim.
+    WildIgnore as wildignore: String = String::new(),
+    /// Suffixes that make a file be searched *last*, as a comma-separated list:
+    /// "files in 'suffixes' are searched last", which is what makes a search
+    /// find the source rather than its backup first. Vim's default list, which
+    /// is also whose files these were.
+    Suffixes as suffixes: String = String::from(".bak,~,.o,.h,.info,.swp,.obj"),
     /// Whether joining lines puts two spaces after a full stop, a question mark or
     /// an exclamation mark — vim's `'joinspaces'`, on by default there and here.
     JoinSpaces as joinspaces: bool = true,

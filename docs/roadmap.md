@@ -3341,6 +3341,35 @@ columns, so a tab in the scrolled-off region can leave the view a column off."
   `position_at`, the cursor's condition, the popup's column),
   `editor/pointer.rs` (the tabstop reaches the scroll).
 
+## Done — `'wildignore'` and `'suffixes'`
+
+The two settings `:vimgrep` left for later, and the first of them is what makes
+a search of a project worth anything: without it, `:vimgrep /x/ **/*.rs` walks
+`target/`.
+
+- **What shipped:** both settings, as vim's comma-separated lists.
+  `'wildignore'` drops a file out of the search — whether a wildcard found it or
+  the argument named it, which the terminal had to settle: vim ignores a file
+  named as it is too. A pattern *with* a separator in it is matched against the
+  path and one without against the file's name; a `*` is any run of characters,
+  separators included, and the terminal is what said so (`target/*` kept
+  `target/a/b.rs` out as well as `target/top.rs`). `'suffixes'` reorders the
+  whole list of files so that the suffixed ones come last — the terminal showed
+  that a `.zz` *named first* still came last, so it is about the list and not
+  about one argument — and vim's default list is the default here, which means a
+  `.bak` is searched last without anybody asking.
+- **Constraints it had to respect, and how:** a pattern has to be matched against
+  a path a person could have written, so the path is made relative to the current
+  directory when it is under it, separators are read as `/`, and a leading `./`
+  goes: a walk that started from an absolute path still answers to
+  `wildignore=target/*`. The patterns themselves are read the same way, which
+  means either kind of separator works on Windows. The one place a
+  comma-separated list is split is now `command::split_list`, which `gf`'s
+  `'suffixesadd'` uses as well.
+- **Files:** `settings.rs` (two lines), `command.rs` (`split_list`, `ignored`,
+  `written`, `files_named`), `editor/ex.rs` (`run_vimgrep` gathers and orders the
+  files before it reads any of them).
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
@@ -3348,8 +3377,8 @@ modules with new logic in each, that is a sign it should be split.
 
 ### 1. Bigger seams, not yet designed
 
-the rest of the dialect (`\p`/`\P`, `\@<=` and the lookarounds, `\%V`, `\%>l`),
-`'wildignore'` and `'suffixes'` for `:vimgrep`, and fuzzy matching.
+the rest of the dialect (`\p`/`\P`, `\@<=` and the lookarounds, `\%V`, `\%>l`)
+and fuzzy matching for `:vimgrep`'s `f` flag.
 Each one should get its own design note first if it wants to change
 `inkstone-rpc`; the further features are from the protocol, the cheaper they
 are, which is the point of the split. [`rendering.md`](rendering.md) covers

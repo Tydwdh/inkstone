@@ -37,6 +37,14 @@
   share, so both now read `E54: \zs cannot be followed by a multi`.
 
 ### Added
+- `'wildignore'` and `'suffixes'`, the two settings `:vimgrep` wanted: a file
+  that matches a `'wildignore'` pattern is left out of a search whether a
+  wildcard found it or the argument named it (a pattern with a separator in it is
+  matched against the whole path, which is what makes `target/*` keep a build
+  tree out of a search), and a file whose name ends with one of `'suffixes'` is
+  searched last, so a search finds the source rather than its backup first. Both
+  defaults are vim's, which makes `'suffixes'` non-empty — `.bak,~,.o,.h,.info,
+  .swp,.obj` — exactly as it is there.
 - `:vimgrep /{pattern}/[g][j] {file}...`, which fills the places list — the one
   `:copen` shows, `<CR>` goes to a line of and `:cnext` walks — from a search of
   its own. The pattern is `/`'s, dialect and all, and so are the case rules

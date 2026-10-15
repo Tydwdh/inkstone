@@ -179,6 +179,91 @@ fn a_count_is_the_most_places_to_find() {
 }
 
 #[test]
+fn wildignore_keeps_a_file_out_of_a_search() {
+    let dir = scratch(
+        "ignore",
+        &[
+            ("keep.txt", "needle\n"),
+            ("skip.txt", "needle\n"),
+            ("target/inner.rs", "needle\n"),
+        ],
+    );
+    let names = |ed: &Editor| -> Vec<String> {
+        ed.places
+            .iter()
+            .map(|place| {
+                place
+                    .0
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    };
+
+    // A pattern with no separator in it is the file's name, and a file that
+    // matches is ignored whether a wildcard found it or the argument named it.
+    let mut ed = Editor::for_tests();
+    ed.options.borrow_mut().wildignore = "skip.txt".to_string();
+    ed.execute_cmdline(&format!("vimgrep /needle/j {}/**", dir.display()));
+    assert_eq!(names(&ed), vec!["keep.txt", "inner.rs"], "skip.txt is out");
+    ed.execute_cmdline(&format!("vimgrep /needle/j {}/skip.txt", dir.display()));
+    assert_eq!(ed.places.len(), 0, "and named as it is, the same");
+    assert!(ed.message.starts_with("E480"), "{}", ed.message);
+
+    // A pattern with a separator in it is matched against the path, which is
+    // what keeps a build tree out of a search.
+    ed.options.borrow_mut().wildignore = format!("{}/*", dir.join("target").display());
+    ed.execute_cmdline(&format!("vimgrep /needle/j {}/**", dir.display()));
+    assert_eq!(names(&ed), vec!["keep.txt", "skip.txt"]);
+}
+
+#[test]
+fn a_suffixed_file_is_searched_last() {
+    let dir = scratch(
+        "suffixes",
+        &[
+            ("a.zz", "needle\n"),
+            ("b.txt", "needle\n"),
+            ("keep.txt", "needle\n"),
+        ],
+    );
+    let names = |ed: &Editor| -> Vec<String> {
+        ed.places
+            .iter()
+            .map(|place| {
+                place
+                    .0
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    };
+
+    let mut ed = Editor::for_tests();
+    ed.options.borrow_mut().suffixes = ".zz".to_string();
+    ed.execute_cmdline(&format!("vimgrep /needle/j {}/*", dir.display()));
+    assert_eq!(
+        names(&ed),
+        vec!["b.txt", "keep.txt", "a.zz"],
+        "the suffix the setting names comes last"
+    );
+
+    // The default list is vim's, so a backup is searched last without anybody
+    // asking: the terminal says `suffixes=.bak,~,.o,.h,.info,.swp,.obj`.
+    let dir = scratch(
+        "suffixes-default",
+        &[("a.bak", "needle\n"), ("b.txt", "needle\n")],
+    );
+    let mut ed = Editor::for_tests();
+    ed.execute_cmdline(&format!("vimgrep /needle/j {}/*", dir.display()));
+    assert_eq!(names(&ed), vec!["b.txt", "a.bak"]);
+}
+
+#[test]
 fn an_empty_pattern_is_the_last_search_and_the_last_search_is_not_replaced() {
     let dir = scratch("last", &[("a.txt", "one\nthree\n")]);
     let a = dir.join("a.txt");

@@ -601,45 +601,70 @@ impl Editor {
         };
 
         let limit = spec.limit.unwrap_or(usize::MAX);
+        let (ignore, suffixes) = {
+            let options = self.options.borrow();
+            (
+                crate::command::split_list(&options.wildignore),
+                crate::command::split_list(&options.suffixes),
+            )
+        };
+        // Every file the arguments name, before any of them is read: "files in
+        // 'suffixes' are searched last" is about the *list* and not about one
+        // argument — the terminal showed a `.zz` named first still coming last.
+        let named: Vec<PathBuf> = spec
+            .files
+            .iter()
+            .flat_map(|argument| crate::command::files_named(argument, &ignore))
+            .collect();
+        let suffixed = |path: &Path| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            suffixes
+                .iter()
+                .any(|suffix| name.ends_with(suffix.as_str()))
+        };
+        let mut files: Vec<PathBuf> = named
+            .iter()
+            .filter(|path| !suffixed(path))
+            .cloned()
+            .collect();
+        files.extend(named.iter().filter(|path| suffixed(path)).cloned());
+
         let mut places: Vec<(PathBuf, usize, usize)> = Vec::new();
-        let mut files = 0;
-        for argument in &spec.files {
+        let mut searched = 0;
+        for path in files {
             if places.len() >= limit {
                 break;
             }
-            for path in crate::command::files_named(argument) {
+            // A file that cannot be read is skipped rather than reported: an
+            // argument is a name, and a name that is not there is not a reason
+            // for a search to stop. vim says the same thing in the end, with
+            // "E480: No match" when nothing at all was found.
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let buffer = Buffer::from_text(&text);
+            let mut asked = None;
+            let mut here = 0;
+            for (start, _) in crate::search::find_places(&buffer, &compiled, &translated.extent) {
+                let (row, col) = buffer.char_to_line_col(start);
+                // Without `g` a line is a place of its own once, however often
+                // the pattern matches in it.
+                let place = spec.all || asked != Some(row);
+                asked = Some(row);
+                if !place {
+                    continue;
+                }
+                places.push((path.clone(), row, col));
+                here += 1;
                 if places.len() >= limit {
                     break;
                 }
-                // A file that cannot be read is skipped rather than reported:
-                // an argument is a name, and a name that is not there is not a
-                // reason for a search to stop. vim says the same thing in the
-                // end, with "E480: No match" when nothing at all was found.
-                let Ok(text) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let buffer = Buffer::from_text(&text);
-                let mut asked = None;
-                let mut here = 0;
-                for (start, _) in crate::search::find_places(&buffer, &compiled, &translated.extent)
-                {
-                    let (row, col) = buffer.char_to_line_col(start);
-                    // Without `g` a line is a place of its own once, however
-                    // often the pattern matches in it.
-                    let place = spec.all || asked != Some(row);
-                    asked = Some(row);
-                    if !place {
-                        continue;
-                    }
-                    places.push((path.clone(), row, col));
-                    here += 1;
-                    if places.len() >= limit {
-                        break;
-                    }
-                }
-                if here > 0 {
-                    files += 1;
-                }
+            }
+            if here > 0 {
+                searched += 1;
             }
         }
         if places.is_empty() {
@@ -658,9 +683,9 @@ impl Editor {
             self.walk_places(true, 0);
         } else {
             self.message = format!(
-                "{count} match{} in {files} file{}",
+                "{count} match{} in {searched} file{}",
                 if count == 1 { "" } else { "es" },
-                if files == 1 { "" } else { "s" }
+                if searched == 1 { "" } else { "s" }
             );
             self.redraw = true;
         }

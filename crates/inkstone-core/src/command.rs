@@ -3948,6 +3948,20 @@ fn goto_file_visual(editor: &mut Editor, params: &[Param]) -> Result<()> {
     open_named(editor, &name, count(params), None)
 }
 
+/// The entries of a comma-separated list setting, with the empties left out.
+///
+/// The shape vim's list options are written in — `'path'`, `'suffixesadd'`,
+/// `'wildignore'`, `'suffixes'` — and the one place the trimming is done, so that
+/// a setting written with spaces around its commas means the same thing
+/// everywhere.
+pub(crate) fn split_list(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Open the file `name` names, the count'th the search finds, at `line` if one
 /// was given.
 fn open_named(editor: &mut Editor, name: &str, count: usize, line: Option<usize>) -> Result<()> {
@@ -3967,15 +3981,7 @@ fn open_named(editor: &mut Editor, name: &str, count: usize, line: Option<usize>
     // `file-searching`. The name itself is taken literally, because `isfname`
     // has no `*` in it: the pattern is the directory's, not the file's.
     let entries = editor.options.borrow().path.0.clone();
-    let suffixes: Vec<String> = editor
-        .options
-        .borrow()
-        .suffixesadd
-        .split(',')
-        .map(str::trim)
-        .filter(|suffix| !suffix.is_empty())
-        .map(str::to_string)
-        .collect();
+    let suffixes = split_list(&editor.options.borrow().suffixesadd);
     for dir in entries.iter() {
         candidates.extend(path_candidates(dir, name));
     }
@@ -4215,26 +4221,79 @@ fn push_files_down(dir: &Path, depth: usize, out: &mut Vec<std::path::PathBuf>) 
 /// an argument is a whole path rather than a name to look for. The order is the
 /// one the walk reaches, which is by name, so `:cnext` walks a list in a
 /// sensible order.
-pub(crate) fn files_named(argument: &str) -> Vec<std::path::PathBuf> {
-    if !argument.contains(['*', '?', '[', ']']) {
-        return vec![std::path::PathBuf::from(argument)];
-    }
-    let pattern: Vec<String> = std::path::Path::new(argument)
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    let wild_at = pattern
-        .iter()
-        .position(|part| part.contains(['*', '?', '[', ']']))
-        .unwrap_or(0);
-    let mut base = path_head(&pattern[..wild_at]);
-    if base.as_os_str().is_empty() {
-        // A pattern with no directory in it is a pattern in this one.
-        base.push(".");
-    }
-    let mut found = Vec::new();
-    match_directories(&base, &pattern, wild_at, Names::Pattern, &mut found);
+///
+/// `ignore` is `'wildignore'`, as a list of patterns: a file that matches one is
+/// dropped whether the argument named it or a wildcard found it — "a file that
+/// matches with one of these patterns is ignored" — which is what the terminal
+/// says vim does with its own.
+pub(crate) fn files_named(argument: &str, ignore: &[String]) -> Vec<std::path::PathBuf> {
+    let mut found = if !argument.contains(['*', '?', '[', ']']) {
+        vec![std::path::PathBuf::from(argument)]
+    } else {
+        let pattern: Vec<String> = std::path::Path::new(argument)
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        let wild_at = pattern
+            .iter()
+            .position(|part| part.contains(['*', '?', '[', ']']))
+            .unwrap_or(0);
+        let mut base = path_head(&pattern[..wild_at]);
+        if base.as_os_str().is_empty() {
+            // A pattern with no directory in it is a pattern in this one.
+            base.push(".");
+        }
+        let mut found = Vec::new();
+        match_directories(&base, &pattern, wild_at, Names::Pattern, &mut found);
+        found
+    };
+    found.retain(|path| !ignored(path, ignore));
     found
+}
+
+/// Whether `'wildignore'` keeps a file out of a search.
+///
+/// A pattern with a separator in it is matched against the path and one without
+/// against the file's name; `*` is any run of characters, separators included.
+/// The path is the one a person would write — `/` between the parts, no `./` in
+/// front of it, and no drive-relative prefix either — since a pattern is written
+/// by a person and matched against what a `:vimgrep` would report.
+fn ignored(path: &Path, patterns: &[String]) -> bool {
+    if patterns.iter().all(|pattern| pattern.trim().is_empty()) {
+        return false;
+    }
+    // Relative to the current directory when it is under it, so that a pattern
+    // written the way a person writes one — `target/*` — matches a walk that
+    // happened to start from an absolute path.
+    let shown = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| path.strip_prefix(cwd).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| path.to_path_buf());
+    let text = written(&shown);
+    let name = shown
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    patterns.iter().any(|pattern| {
+        let pattern = written(Path::new(pattern.trim()));
+        if pattern.is_empty() {
+            return false;
+        }
+        if pattern.contains('/') {
+            glob_matches(&pattern, &text)
+        } else {
+            glob_matches(&pattern, &name)
+        }
+    })
+}
+
+/// A path as a pattern is written: `/` between the parts, and no `./` in front.
+fn written(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    match text.strip_prefix("./") {
+        Some(rest) => rest.to_string(),
+        None => text,
+    }
 }
 
 /// Look for the rest of the pattern in `dir` and in every directory under it,

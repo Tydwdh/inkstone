@@ -688,6 +688,11 @@ places to find, `//` is the last pattern a search used, and nothing found is
 `E480` with an empty list rather than the one that was there before. The
 pattern, the dialect and the case rules are a search's — except that
 `'smartcase'` is not used, which is what the manual says of this command alone.
+Two settings say what is looked at: `'wildignore'` is a list of file patterns to
+leave alone — a pattern with a separator in it is matched against the whole path,
+which is what makes `:set wildignore=target/*` keep a build tree out of a search
+— and `'suffixes'` names the files searched *last*, so a search finds the source
+rather than its backup first.
 
 `format` asks a language server to lay the file out — `textDocument/formatting`, or
 `:{range}format` for part of it —
@@ -775,7 +780,7 @@ end)
 | `ed.map(mode, lhs, rhs)` | bind `lhs` in mode `"n"`, `"v"` or `"i"` to a command name, a function, or `nil` to unbind |
 | `ed.command(name, fn)` | register (or replace) a command callable by name |
 | `ed.run(name, params)` | run a command; the call is queued and executed after the script returns |
-| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path` (a comma-separated list), `foldmethod` (`manual` or `indent`), `foldlevel`, `foldminlines` and `cmdwinheight` (integers), `foldnestmax` (an integer), `foldignore` (characters) and `suffixesadd` (a comma-separated list) |
+| `ed.set(name, value)` / `ed.get(name)` | options: `tabstop`, `textwidth` and `scrolloff` (integers), `number`, `ignorecase`, `smartcase`, `incsearch`, `hlsearch`, `wrapscan`, `highlight`, `autoindent`, `smartindent`, `lsp`, `formatonsave`, `joinspaces` (booleans), `path`, `wildignore`, `suffixes` and `suffixesadd` (comma-separated lists), `foldmethod` (`manual` or `indent`), `foldlevel`, `foldminlines` and `cmdwinheight` (integers), `foldnestmax` (an integer) and `foldignore` (characters) |
 
 Insert-mode mappings can be sequences too: `ed.map("i", "jk", "<Esc>")` is the
 one everybody writes. The keys that could start a mapping are held back until

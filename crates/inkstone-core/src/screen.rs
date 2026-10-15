@@ -10,6 +10,9 @@ pub use inkstone_rpc::{Cell, Color, Grid, ATTR_BOLD, ATTR_REVERSE, ATTR_UNDERLIN
 use crate::buffer::Buffer;
 use crate::cursor::Cursor;
 
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+
 /// Rows reserved at the bottom of the screen: one status line and one
 /// command/message line.
 pub(crate) const CHROME_ROWS: u16 = 2;
@@ -19,7 +22,11 @@ pub(crate) const CHROME_ROWS: u16 = 2;
 pub struct Viewport {
     /// Index of the first visible buffer line.
     pub(crate) top_line: usize,
-    /// Character offset of the first visible column (horizontal scroll).
+    /// Cell offset of the first visible column (horizontal scroll).
+    ///
+    /// A cell and not a character: a tab is a run of them and a wide grapheme
+    /// takes two, so a view can start in the middle of a tab — which is what
+    /// vim does too, and the reason a scroll cannot be counted in characters.
     pub(crate) left_col: usize,
     /// Terminal width in columns.
     pub width: u16,
@@ -51,13 +58,72 @@ impl Viewport {
     }
 }
 
+/// How many cells a grapheme takes, counted from the cell it starts at.
+///
+/// A tab is a run of cells up to the next stop — the stops are `'tabstop'`
+/// apart, counted from the start of the line — and everything else is as wide as
+/// it looks. Zero for a combining mark, which is drawn with the character before
+/// it and so has no cell of its own.
+pub(crate) fn cell_advance(grapheme: &str, cells: usize, tabstop: usize) -> usize {
+    if grapheme == "\t" {
+        let stop = tabstop.max(1);
+        stop - (cells % stop)
+    } else {
+        UnicodeWidthStr::width(grapheme)
+    }
+}
+
+/// The cell the character at `col` of a line starts at.
+///
+/// This is the cell the *line* puts it in, counted from the line's own start and
+/// not from the window's: a scroll is a cell offset, so where a character lands
+/// cannot depend on where the view happens to begin.
+pub(crate) fn cells_of(line: &str, tabstop: usize, col: usize) -> usize {
+    let mut cells = 0;
+    let mut at = 0;
+    for grapheme in line.graphemes(true) {
+        if at >= col {
+            break;
+        }
+        cells += cell_advance(grapheme, cells, tabstop);
+        at += grapheme.chars().count();
+    }
+    cells
+}
+
+/// How many cells the character at `col` takes. Nothing past the end of the
+/// line, which is where the cursor goes in insert mode.
+pub(crate) fn width_of(line: &str, tabstop: usize, col: usize) -> usize {
+    let mut cells = 0;
+    let mut at = 0;
+    for grapheme in line.graphemes(true) {
+        let width = cell_advance(grapheme, cells, tabstop);
+        if at >= col {
+            return width;
+        }
+        cells += width;
+        at += grapheme.chars().count();
+    }
+    0
+}
+
 /// Scroll `vp` the minimum amount needed to bring `cur` back into view.
 ///
-/// `gutter` is the width of the line-number column: it eats into the columns
-/// available for text, so a viewport that ignored it would scroll too little
-/// and leave the cursor stranded past the right edge. `scrolloff` is the
-/// setting of the same name: lines of context to keep on either side.
-pub fn ensure_cursor_visible(vp: &mut Viewport, cur: Cursor, gutter: u16, scrolloff: usize) {
+/// `line` is the cursor's own line and `tabstop` the setting of the same name:
+/// the two of them are what say which *cell* the cursor is in, which is not its
+/// character column once a tab or a wide grapheme is in front of it. `gutter` is
+/// the width of the line-number column: it eats into the columns available for
+/// text, so a viewport that ignored it would scroll too little and leave the
+/// cursor stranded past the right edge. `scrolloff` is the setting of the same
+/// name: lines of context to keep on either side.
+pub fn ensure_cursor_visible(
+    vp: &mut Viewport,
+    cur: Cursor,
+    line: &str,
+    tabstop: usize,
+    gutter: u16,
+    scrolloff: usize,
+) {
     // A degenerate viewport has no room to scroll into, so the cursor's own
     // position becomes the origin rather than an invented offset.
     let rows = vp.text_rows() as usize;
@@ -73,11 +139,17 @@ pub fn ensure_cursor_visible(vp: &mut Viewport, cur: Cursor, gutter: u16, scroll
         vp.top_line = (cur.row + margin + 1).saturating_sub(rows);
     }
 
+    // The column is the same thing one dimension over: what has to be inside
+    // the window is the cursor's own cell, and the cells a tab or a wide
+    // grapheme takes are why its character column is not enough to say where it
+    // is.
     let columns = vp.width.saturating_sub(gutter) as usize;
-    if columns == 0 || cur.col < vp.left_col {
-        vp.left_col = cur.col;
-    } else if cur.col >= vp.left_col + columns {
-        vp.left_col = cur.col + 1 - columns;
+    let cells = cells_of(line, tabstop, cur.col);
+    let wide = width_of(line, tabstop, cur.col).max(1);
+    if columns == 0 || cells < vp.left_col {
+        vp.left_col = cells;
+    } else if cells + wide > vp.left_col + columns {
+        vp.left_col = cells + wide - columns;
     }
 }
 
@@ -87,10 +159,15 @@ pub fn scroll_to_cursor(
     vp: &mut Viewport,
     cur: Cursor,
     buf: &Buffer,
+    tabstop: usize,
     gutter: u16,
     scrolloff: usize,
 ) {
-    ensure_cursor_visible(vp, cur, gutter, scrolloff);
+    // The cursor's own line, which is what its column has to be measured in:
+    // the caller has already clamped the row into the buffer.
+    let row = cur.row.min(buf.line_count().saturating_sub(1));
+    let line = buf.line_string(row);
+    ensure_cursor_visible(vp, cur, &line, tabstop, gutter, scrolloff);
     // Never scroll past the end of the document if it fits.
     let lines = buf.line_count();
     let rows = vp.text_rows() as usize;
@@ -122,12 +199,12 @@ mod tests {
     fn ensure_visible_scrolls_down_minimally() {
         let mut vp = Viewport::new(80, 12); // 10 text rows
         vp.top_line = 0;
-        ensure_cursor_visible(&mut vp, Cursor::new(10, 0), 0, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(10, 0), "x", 4, 0, 0);
         assert_eq!(vp.top_line, 1);
-        ensure_cursor_visible(&mut vp, Cursor::new(11, 0), 0, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(11, 0), "x", 4, 0, 0);
         assert_eq!(vp.top_line, 2);
         // Already visible: no movement.
-        ensure_cursor_visible(&mut vp, Cursor::new(5, 0), 0, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(5, 0), "x", 4, 0, 0);
         assert_eq!(vp.top_line, 2);
     }
 
@@ -135,7 +212,7 @@ mod tests {
     fn ensure_visible_scrolls_up() {
         let mut vp = Viewport::new(80, 12);
         vp.top_line = 8;
-        ensure_cursor_visible(&mut vp, Cursor::new(3, 0), 0, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(3, 0), "x", 4, 0, 0);
         assert_eq!(vp.top_line, 3);
     }
 
@@ -143,22 +220,23 @@ mod tests {
     fn a_line_number_gutter_reduces_the_room_for_text() {
         let mut vp = Viewport::new(10, 12);
         // 2 columns go to the gutter, so column 8 is the last fully visible one.
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 7), 2, 0);
+        let line = "0123456789";
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 7), line, 4, 2, 0);
         assert_eq!(vp.left_col, 0);
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 8), 2, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 8), line, 4, 2, 0);
         assert_eq!(vp.left_col, 1);
     }
 
     #[test]
     fn a_degenerate_viewport_pins_the_cursor_to_the_visible_origin() {
         let mut vp = Viewport::new(0, 0);
-        ensure_cursor_visible(&mut vp, Cursor::new(7, 4), 0, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(7, 4), "xxxxx", 4, 0, 0);
         assert_eq!((vp.top_line, vp.left_col), (7, 4));
 
         let buf = Buffer::from_text(&"x\n".repeat(10));
         let mut vp = Viewport::new(80, 0);
         vp.top_line = 3;
-        scroll_to_cursor(&mut vp, Cursor::new(3, 0), &buf, 0, 0);
+        scroll_to_cursor(&mut vp, Cursor::new(3, 0), &buf, 4, 0, 0);
         assert_eq!(
             vp.top_line, 3,
             "a zero-height viewport keeps the cursor line"
@@ -169,10 +247,34 @@ mod tests {
     fn ensure_visible_scrolls_right() {
         let mut vp = Viewport::new(10, 12);
         vp.top_line = 0;
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 9), 0, 0);
+        let line = "0123456789abcdef";
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 9), line, 4, 0, 0);
         assert_eq!(vp.left_col, 0, "column 9 is the last visible one");
-        ensure_cursor_visible(&mut vp, Cursor::new(0, 10), 0, 0);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 10), line, 4, 0, 0);
         assert_eq!(vp.left_col, 1);
+    }
+
+    #[test]
+    fn the_column_scroll_counts_cells_and_not_characters() {
+        // A tab is a run of cells, so a cursor a few characters into a line can
+        // be well past the right edge: what has to be on screen is the cursor's
+        // own *cell*, which is where a scroll counted in characters goes wrong.
+        let mut vp = Viewport::new(10, 12);
+        // "\t\tabcdefghij" with a tabstop of four: `a` is the third character
+        // and the ninth cell, and `g` the ninth character and the fifteenth.
+        let line = "\t\tabcdefghij";
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 2), line, 4, 0, 0);
+        assert_eq!(vp.left_col, 0, "the ninth cell is inside ten of them");
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 8), line, 4, 0, 0);
+        assert_eq!(
+            vp.left_col, 5,
+            "and the fifteenth is not: ten of them from five"
+        );
+
+        // A wide grapheme takes two cells, and both of them have to fit.
+        let mut vp = Viewport::new(4, 12);
+        ensure_cursor_visible(&mut vp, Cursor::new(0, 3), "ab你x", 4, 0, 0);
+        assert_eq!(vp.left_col, 1, "the wide one needs its second cell too");
     }
 
     #[test]
@@ -180,12 +282,12 @@ mod tests {
         let buf = Buffer::from_text("a\nb\nc\n");
         let mut vp = Viewport::new(80, 12); // 10 text rows
         vp.top_line = 7;
-        scroll_to_cursor(&mut vp, Cursor::new(0, 0), &buf, 0, 0);
+        scroll_to_cursor(&mut vp, Cursor::new(0, 0), &buf, 4, 0, 0);
         assert_eq!(vp.top_line, 0, "3 lines fit, so the view starts at the top");
 
         let long = Buffer::from_text("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\n");
         let mut vp = Viewport::new(80, 12);
-        scroll_to_cursor(&mut vp, Cursor::new(11, 0), &long, 0, 0);
+        scroll_to_cursor(&mut vp, Cursor::new(11, 0), &long, 4, 0, 0);
         assert_eq!(
             vp.top_line, 2,
             "12 lines in 10 rows: the last screen starts at 2"

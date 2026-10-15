@@ -415,6 +415,7 @@ impl Editor {
             &mut self.viewport,
             self.cursor,
             &self.buffer,
+            options.tabstop.max(1),
             gutter,
             options.scrolloff.0,
         );

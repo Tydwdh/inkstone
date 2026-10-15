@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Fixed
+- A horizontal scroll counts cells and not characters. A tab is a run of cells
+  and a wide grapheme takes two, so a cursor a few characters into a tabbed line
+  is well past the right edge of a narrow window: the view scrolled too little
+  and left the cursor off the screen, which the roadmap called "a column off".
+  The scroll now works in cells, the way the vertical one works in lines, and a
+  view that starts in the middle of a tab draws the cells that are left of it —
+  which is what vim does with them.
 - Closing a list window (`:cclose`, `:lclose`) now closes the document the list was
   made of. It used to stay in `documents` for the rest of the session, one scratch
   document per list opened, all of them visible in `:ls`.

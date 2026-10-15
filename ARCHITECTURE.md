@@ -418,7 +418,5 @@ compiler-enforced.
 
 ## Deliberate limitations
 
-- Horizontal scroll is measured in characters, not display columns, so a tab in
-  the scrolled-off region can leave the view a column off.
 - A brand-new empty file is written as one byte (`"\n"`), which is stable on
   reload but differs from vim's zero bytes.

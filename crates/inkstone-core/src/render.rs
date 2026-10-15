@@ -362,14 +362,18 @@ fn draw_pane(
         // point at nothing. (The cursor's own column is left alone — setting it there
         // undoes the motion an operator is about to take.)
         let on_a_fold_line = closed_fold_at(pane, line_no).is_some();
-        let cursor_char = if pane.cursor.row == line_no && pane.cursor.col >= pane.left_col {
-            Some(if on_a_fold_line {
-                pane.left_col
-            } else {
-                pane.cursor.col
-            })
-        } else {
-            None
+        // The cursor is placed by the walk that draws, which is what knows
+        // which cell its character lands in and whether that cell is on screen:
+        // one hunted off to the left or the right is simply never reached.
+        let cursor_char = match (pane.cursor.row == line_no, on_a_fold_line) {
+            (false, _) => None,
+            (true, false) => Some(pane.cursor.col),
+            // "While the cursor is on folded lines, the cursor is always
+            // *displayed* in the first column" — and a fold row is its marker,
+            // drawn from its own first cell, so the column the view starts at is
+            // the one that lands there. (The marker has no tabs in it, so its
+            // cells and its characters are the same thing.)
+            (true, true) => Some(pane.left_col.min(line.chars().count().saturating_sub(1))),
         };
         let highlight = RowHighlight {
             selected: selection_columns(pane, line_no),
@@ -439,9 +443,11 @@ fn draw_completion(grid: &mut Grid, view: &View<'_>, completion: &crate::editor:
     };
     // The popup hangs from the word being completed rather than from the
     // cursor: the cursor moves along as items are typed, and a list that moved
-    // with it would jump under the hands.
+    // with it would jump under the hands. The column is a cell count, like the
+    // scroll it is measured against.
     let (_, start_col) = view.buffer.char_to_line_col(completion.start);
-    let column = start_col
+    let line = view.buffer.line_string(view.cursor.row);
+    let column = crate::screen::cells_of(&line, view.tabstop.max(1), start_col)
         .saturating_sub(layout.left_col)
         .min(view.viewport.width as usize) as u16
         + layout.gutter;
@@ -544,7 +550,9 @@ pub(crate) fn position_at(view: &View<'_>, x: u16, y: u16) -> Option<(usize, Cur
     }
 
     let tabstop = view.tabstop.max(1);
-    let target = (x - rect.x - gutter) as usize;
+    // The click is in the window's cells; the walk is in the line's, and the
+    // scroll is where they meet.
+    let target = (x - rect.x - gutter) as usize + pane.left_col;
     let width = rect.width.saturating_sub(gutter) as usize;
     let buffer = pane.buffer;
     let left_col = pane.left_col;
@@ -553,15 +561,7 @@ pub(crate) fn position_at(view: &View<'_>, x: u16, y: u16) -> Option<(usize, Cur
     let mut char_idx = 0usize;
     for grapheme in line.graphemes(true) {
         let chars = grapheme.chars().count();
-        if char_idx < left_col {
-            char_idx += chars;
-            continue;
-        }
-        let span = if grapheme == "\t" {
-            tabstop - (cells % tabstop)
-        } else {
-            UnicodeWidthStr::width(grapheme)
-        };
+        let span = crate::screen::cell_advance(grapheme, cells, tabstop);
         if span == 0 {
             // A combining mark is drawn with the character before it, so there
             // is no cell of its own to click.
@@ -575,7 +575,7 @@ pub(crate) fn position_at(view: &View<'_>, x: u16, y: u16) -> Option<(usize, Cur
             return Some((window, Cursor::new(line_no, col)));
         }
         cells += span;
-        if cells >= width {
+        if cells >= left_col + width {
             break;
         }
         char_idx += chars;
@@ -774,15 +774,40 @@ fn draw_line(
     let tabstop = layout.tabstop.max(1);
     let mut x = left;
     let mut char_idx = 0usize;
+    // The cell of the line the next grapheme starts at. The scroll is a cell
+    // offset, so a grapheme can be half to the left of the view — a tab, whose
+    // remaining cells are blank — and the drawing has to walk in the line's own
+    // cells rather than the window's.
+    let mut cells = 0usize;
     let mut found = None;
+    // Whether the cursor's character was passed over on the left, which is off
+    // the screen rather than at the end of what is drawn.
+    let mut skipped = false;
 
     for grapheme in line.graphemes(true) {
         let grapheme_chars = grapheme.chars().count();
-        if char_idx < left_col {
+        let width = crate::screen::cell_advance(grapheme, cells, tabstop);
+        let on_cursor = Some(char_idx) == cursor_char;
+        if cells + width <= left_col {
+            // Wholly to the left of the view.
+            skipped = skipped || on_cursor;
+            cells += width;
             char_idx += grapheme_chars;
             continue;
         }
-        if Some(char_idx) == cursor_char {
+        if cells < left_col {
+            // The view starts inside this one: only a tab is wide enough for
+            // that, and its cells left of the view stay blank. The text after it
+            // begins where the tab's cells end.
+            if on_cursor {
+                found = Some(x as u16);
+            }
+            x = left + (cells + width - left_col);
+            cells += width;
+            char_idx += grapheme_chars;
+            continue;
+        }
+        if on_cursor {
             found = Some(x as u16);
         }
         if x >= right {
@@ -791,9 +816,7 @@ fn draw_line(
         let (color, attrs) = highlight.style(char_idx);
         let color = color.unwrap_or(Color::Reset);
         if grapheme == "\t" {
-            let col = x - left;
-            let advance = tabstop - (col % tabstop);
-            for _ in 0..advance {
+            for _ in 0..width {
                 if x >= right {
                     break;
                 }
@@ -801,8 +824,8 @@ fn draw_line(
                 x += 1;
             }
         } else {
-            let width = UnicodeWidthStr::width(grapheme);
             if width == 0 {
+                cells += width;
                 char_idx += grapheme_chars;
                 continue;
             }
@@ -819,13 +842,15 @@ fn draw_line(
             );
             x += width;
         }
+        cells += width;
         char_idx += grapheme_chars;
     }
 
     // The cursor past the end of the line (insert mode) or beyond the
-    // truncation point belongs at the end of the drawn text.
+    // truncation point belongs at the end of the drawn text; one that the walk
+    // passed on the left is off the screen, and says so.
     match (&found, cursor_char) {
-        (None, Some(_)) => Some(x.min(u16::MAX as usize) as u16),
+        (None, Some(_)) if !skipped => Some(x.min(u16::MAX as usize) as u16),
         _ => found,
     }
 }
@@ -1247,7 +1272,9 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_scroll_is_by_character() {
+    fn a_horizontal_scroll_starts_at_the_cell_it_says() {
+        // For a plain line a cell is a character, so this is the arithmetic
+        // underneath the tab case below.
         let mut c = Case::new("abcdefghij\n", 5, 3);
         c.viewport.left_col = 3;
         let out = c.compose();
@@ -1255,6 +1282,38 @@ mod tests {
         // Cursor hunted off to the left is not drawn.
         c.cursor = Cursor::new(0, 1);
         assert!(!c.compose().cursor_visible);
+    }
+
+    #[test]
+    fn a_horizontal_scroll_counts_cells_and_not_characters() {
+        // With the default tabstop of four, "\t\tabcdefghij" puts the `a` at the
+        // *ninth* cell and the third character. A scroll counted in characters
+        // would show the middle of the text and leave the cursor — which is on
+        // the first cell shown — off the screen entirely.
+        let mut c = Case::new("\t\tabcdefghij\n", 10, 3);
+        c.viewport.left_col = 8;
+        c.cursor = Cursor::new(0, 2);
+        let out = c.compose();
+        assert_eq!(row(&out, 0), "abcdefghij", "the view starts at the `a`");
+        assert!(out.cursor_visible, "and the cursor is on the screen");
+        assert_eq!(
+            out.cursor,
+            (0, 0),
+            "at the left edge, where the view starts"
+        );
+    }
+
+    #[test]
+    fn a_view_that_starts_inside_a_tab_draws_what_is_left_of_it() {
+        // A tab is a run of cells, so a view can start in the middle of one:
+        // what is left of it is blank, and the text after it starts where the
+        // tab's cells end.
+        let mut c = Case::new("\tabc\n", 10, 3);
+        c.viewport.left_col = 2;
+        c.cursor = Cursor::new(0, 1);
+        let out = c.compose();
+        assert_eq!(row(&out, 0), "  abc", "the last two cells of the tab");
+        assert_eq!(out.cursor.0, 2, "and the `a` follows them");
     }
 
     #[test]

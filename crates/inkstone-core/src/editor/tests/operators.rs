@@ -1862,6 +1862,24 @@ fn a_zero_width_terminal_still_tracks_the_cursor_column() {
 }
 
 #[test]
+fn the_scroll_brings_the_cursor_into_view_by_cells_not_characters() {
+    // A line of tabs is several times wider than its characters are long, so a
+    // cursor a few characters in is well past the right edge of a ten-cell
+    // window. Counting characters there scrolls too little and leaves the
+    // cursor off the screen — the wart the roadmap called "a column off".
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("\t\tabcdefghij\n");
+    ed.handle_resize(10, 3);
+    ed.cursor = Cursor::new(0, 8);
+    ed.after_edit();
+    assert_eq!(
+        ed.viewport.left_col, 5,
+        "the `g` is the fifteenth cell, and ten of them fit"
+    );
+    assert!(ed.compose().cursor_visible);
+}
+
+#[test]
 fn edit_refuses_to_discard_unsaved_changes() {
     let dir = std::env::temp_dir().join("inkstone-editor-tests");
     std::fs::create_dir_all(&dir).unwrap();

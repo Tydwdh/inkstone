@@ -3304,6 +3304,43 @@ happens to show places.
   `files_named`, `push_named`), `search.rs` (`find_places`), `editor/ex.rs`
   (`run_vimgrep` and the dispatch).
 
+## Done — a horizontal scroll that counts cells
+
+The last entry in the "known gaps" list that was a *defect* rather than a
+deliberate difference: "Horizontal scroll counts characters, not display
+columns, so a tab in the scrolled-off region can leave the view a column off."
+
+- **What shipped:** `Viewport::left_col` is a *cell* offset rather than a
+  character one, and the scroll that puts the cursor back on screen is worked out
+  in cells — the same way the vertical scroll is worked out in lines. A tab is a
+  run of cells and a wide grapheme takes two, so a cursor a few characters into a
+  tabbed line is far past the right edge of a narrow window; counting characters
+  there scrolled too little and left the cursor invisible, which is what "a
+  column off" meant.
+- **Constraints it had to respect, and how:** the cells have to be the *line's*,
+  counted from the line's start, and not the window's — otherwise where a
+  character lands would depend on where the view happens to begin, and scrolling
+  would move the text under the cursor. `screen::cell_advance` is that rule in
+  one place, used by the drawing walk, the walk that turns a click back into a
+  position, and the scroll. The drawing had to learn one new trick for it: a view
+  can now start *inside* a tab, and the cells of it that are left are blank, the
+  way vim draws them.
+- **What it fixed on the way:** the cursor's own column was compared against the
+  view's (`pane.cursor.col >= pane.left_col`) with a cell on one side and a
+  character on the other; the walk now decides, which is what the comment at the
+  top of `draw_line` always claimed.
+- **Tests, and the one that says the most:** two of them were written first and
+  watched to fail — a composed row that said `ghij` where the view should have
+  started at the `a`, and a scroll that stayed at 0 where it should have moved to
+  5. The fold rule ("the cursor is always *displayed* in the first column") and
+  the completion popup's column both needed the same arithmetic, and the tests
+  for `gf`'s wildcards, the folds and the block selections were what said nothing
+  else moved.
+- **Files:** `screen.rs` (`cell_advance`, `cells_of`, `width_of`,
+  `ensure_cursor_visible`, `scroll_to_cursor`), `render.rs` (`draw_line`,
+  `position_at`, the cursor's condition, the popup's column),
+  `editor/pointer.rs` (the tabstop reaches the scroll).
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
@@ -3321,8 +3358,6 @@ clipboard.
 
 ## Known gaps that are not features
 
-- Horizontal scroll counts characters, not display columns, so a tab in the
-  scrolled-off region can leave the view a column off.
 - A brand-new empty file is written as one byte (`"\n"`) rather than vim's zero.
 - The daemon sends a whole screen only once, and rows after that; a row is a run
   per identical-cell stretch, so a line of text costs a run per character. See

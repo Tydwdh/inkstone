@@ -556,9 +556,12 @@ impl Editor {
     /// collected into that line, the way `:diagnostics` lists what it has.
     pub(crate) fn run_global(&mut self, spec: &crate::global::Global) {
         // `:g` is a search over lines, so `'ignorecase'` and `'smartcase'` are
-        // the ones a `/` would use — vim's own list for `'smartcase'` names it.
-        let ignore_case = self.search_ignore_case(&spec.pattern);
-        let pattern = match regex::RegexBuilder::new(&spec.pattern)
+        // the ones a `/` would use — vim's own list for `'smartcase'` names it —
+        // and a `\c` or `\C` in the pattern settles it first, as it does there.
+        let ignore_case = spec
+            .ignore_case
+            .unwrap_or_else(|| self.search_ignore_case(&spec.pattern));
+        let pattern = match regex::RegexBuilder::new(&spec.translated)
             .case_insensitive(ignore_case)
             .build()
         {

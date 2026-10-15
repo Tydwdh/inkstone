@@ -3202,23 +3202,40 @@ whole match".
   span), `substitute.rs` (the pattern as typed, the group mapping, and the
   splice that replaces the reported part), `editor/ex.rs` and
   `editor/confirm.rs`.
-- **Left for later:** `:g` and `:v`, which are the entry below.
+- **Left for later:** `:g` and `:v`, whose pattern was still matched as it was
+  typed — the entry below this one.
+
+## Done — `:g` and `:v` take the dialect
+
+The one place a pattern was not translated: `:g` compiled what it was given,
+character for character, while `/` and `:s` put it through `dialect` first.
+
+- **What shipped:** their pattern goes through the translation too, so `\(a\)` is
+  a group rather than the three characters `(a)`, `:g/a\zsb/d` is a pattern that
+  can match rather than one that never can, and `\c`/`\C` settle case for them the
+  way they do for a search — over `'ignorecase'` and `'smartcase'`, which are what
+  a pattern that says nothing gets.
+- **Constraints it had to respect, and how:** `:g` asks one thing of a match —
+  whether there is one — so nothing here wants the `Extent` the markers became: a
+  `\zs` or `\ze` in the pattern is translated and then ignored, which is the same
+  thing vim does with them when the question is which lines match. The pattern is
+  kept both ways, as `Substitute` keeps it, because the message that says nothing
+  matched has to show what a person typed.
+- **What the smoke found, and the reason the entry above this one says what it
+  says:** the terminal was used to check the *claim* that `:g/\(a\)/d` is an
+  engine error, and it is not — the engine reads `\(` as a literal parenthesis, so
+  the command looked for the characters `(a)` and said "Pattern not found". The
+  roadmap said "an engine error" for one commit and was wrong.
+- **Files:** `inkstone-core` (`Global`, `run_global`, the case rule).
+- **Left for later:** nothing; the dialect is now the same everywhere a pattern is
+  typed.
 
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
 modules with new logic in each, that is a sign it should be split.
 
-### 1. `:g` and `:v`, the one place the dialect is not used
-
-Their pattern is compiled exactly as it is typed, so `:g/\(a\)/d` looks for the
-characters `(a)` and `:g/a\zsb/d` finds nothing (both checked in a terminal),
-while `/` and `:s` take vim's dialect.
-Everything they need from a match is whether there is one, so no extent is
-involved and the change is the translation itself, plus the message that shows
-the pattern when nothing matched.
-
-### 2. Bigger seams, not yet designed
+### 1. Bigger seams, not yet designed
 
 the quickfix-shaped list window, and the rest of the dialect (`\i`, `\k`, `\f`,
 `\@<=` and the lookarounds, `\%V`, `\%>l`).

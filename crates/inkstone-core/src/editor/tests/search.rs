@@ -91,6 +91,60 @@ fn a_global_line_runs_a_command_on_the_lines_a_pattern_finds() {
 }
 
 #[test]
+fn a_global_pattern_is_written_the_vim_way() {
+    // The pattern goes through the dialect, as `/` and `:s` do: a group, a
+    // word boundary and a case switch mean what they mean there.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("one TODO\nTODO two\nthree\n");
+    ed.execute_cmdline("%g/\\(TODO\\)/d");
+    assert_eq!(
+        ed.buffer.text(),
+        "three\n",
+        "the group is a group, not the characters `(TODO)`"
+    );
+
+    ed.buffer = Buffer::from_text("one\ntwo\nthree\n");
+    ed.execute_cmdline("2,3v/\\<two\\>/d");
+    assert_eq!(ed.buffer.text(), "one\ntwo\n");
+
+    // A `\c` in the pattern is the pattern's own word about case, and it wins
+    // over the setting either way — the rule `/` follows.
+    ed.buffer = Buffer::from_text("One\none\n");
+    ed.options.borrow_mut().ignorecase = false;
+    ed.execute_cmdline("%g/\\cone/d");
+    assert_eq!(ed.buffer.text(), "\n", "both of them, with `\\c`");
+    ed.buffer = Buffer::from_text("One\none\n");
+    ed.execute_cmdline("%g/\\Cone/d");
+    assert_eq!(
+        ed.buffer.text(),
+        "One\n",
+        "with `\\C`, only the lower case one"
+    );
+
+    // The setting is still what a pattern that says nothing gets, and
+    // `'smartcase'` still takes it back for an upper-case pattern.
+    ed.buffer = Buffer::from_text("One\none\n");
+    ed.options.borrow_mut().ignorecase = true;
+    ed.execute_cmdline("%g/one/d");
+    assert_eq!(ed.buffer.text(), "\n", "`ignorecase` finds both");
+    ed.buffer = Buffer::from_text("One\none\n");
+    ed.options.borrow_mut().smartcase = true;
+    ed.execute_cmdline("%g/one/d");
+    assert_eq!(
+        ed.buffer.text(),
+        "\n",
+        "a lower-case pattern still ignores case"
+    );
+    ed.buffer = Buffer::from_text("One\none\n");
+    ed.execute_cmdline("%g/ONE/d");
+    assert_eq!(
+        ed.buffer.text(),
+        "One\none\n",
+        "and an upper-case one does not: `ONE` is neither line"
+    );
+}
+
+#[test]
 fn repeating_a_substitute_with_and_without_its_flags() {
     let mut ed = Editor::for_tests();
     ed.buffer = Buffer::from_text("a a a\nb a a\n");

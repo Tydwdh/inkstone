@@ -12,8 +12,9 @@
 //! says which lines are *searched*, and defaults to the whole file, which is the
 //! difference between this and `:s`, whose default is the cursor's line.
 //!
-//! The pattern is the same dialect `:s` and `/` use — a Rust regular expression
-//! — and the delimiter is any character that is not a letter or a digit, so a
+//! The pattern is the same dialect `:s` and `/` use — vim's, translated into the
+//! engine's, so `\(`, `\<` and a `\c` in it mean what they mean to a search —
+//! and the delimiter is any character that is not a letter or a digit, so a
 //! pattern full of slashes can be written with something else around it.
 
 use crate::substitute::{address_range, strip_range, Address, SubstituteError};
@@ -21,8 +22,14 @@ use crate::substitute::{address_range, strip_range, Address, SubstituteError};
 /// A `:g` or `:v` line, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Global {
-    /// What a line has to match — or, for `:v`, has not to match.
+    /// What a line has to match — or, for `:v`, has not to match — as it was
+    /// typed, which is what a message shows.
     pub(crate) pattern: String,
+    /// The same pattern in the engine's dialect, which is what is compiled.
+    pub(crate) translated: String,
+    /// `Some(true)` after a `\c` in the pattern, `Some(false)` after a `\C`:
+    /// what the pattern itself says about case, which beats the settings.
+    pub(crate) ignore_case: Option<bool>,
     /// The command to run on each matching line, empty for the default `p`.
     pub command: String,
     /// `:v` rather than `:g`: run on the lines that do *not* match.
@@ -64,8 +71,14 @@ impl Global {
             return Err(SubstituteError::Delimiter(delimiter));
         }
         let (pattern, command) = split_at(&rest[delimiter.len_utf8()..], delimiter)?;
+        // The pattern is typed the vim way and compiled the engine's way, the
+        // same as `/` and `:s` — which is the one thing this command used not
+        // to do, so `:g/\(a\)/d` looked for the characters `(a)`.
+        let translated = crate::dialect::translate(&pattern).map_err(SubstituteError::Dialect)?;
         Ok(Global {
             pattern,
+            translated: translated.pattern,
+            ignore_case: translated.ignore_case,
             command: command
                 .trim()
                 .trim_start_matches(delimiter)
@@ -161,5 +174,22 @@ mod tests {
         // A command with an argument of its own travels whole.
         let spec = Global::parse("g/one/s/a/b/").unwrap();
         assert_eq!(spec.command, "s/a/b/");
+
+        // The pattern is typed the vim way and compiled the engine's way, the
+        // same as `/` and `:s`: the two spellings come apart here.
+        let spec = Global::parse("g/\\(one\\)\\zs/").unwrap();
+        assert_eq!(spec.pattern, "\\(one\\)\\zs", "what a message shows");
+        assert_eq!(spec.translated, "(one)()", "what the engine sees");
+        assert_eq!(spec.ignore_case, None, "the pattern said nothing");
+        let spec = Global::parse("g/\\cone/d").unwrap();
+        assert_eq!(spec.translated, "one");
+        assert_eq!(spec.ignore_case, Some(true), "a `\\c` is the pattern's own");
+
+        // A pattern that asks for something the dialect cannot do is refused
+        // here as it is everywhere else, rather than matched as typed.
+        assert_eq!(
+            Global::parse("g/[\\zs]/d").unwrap_err(),
+            SubstituteError::Dialect(crate::dialect::DialectError::InCollection("\\zs"))
+        );
     }
 }

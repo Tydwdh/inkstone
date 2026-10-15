@@ -17,6 +17,12 @@
   decided once, at startup, decided about no file at all. The daemon also ticks
   whether or not a server is running yet, since the tick that starts one is the
   one before there is one.
+- `:g` and `:v` take their pattern through the dialect, as `/` and `:s` do. They
+  were the one place it was compiled exactly as it is typed, so `:g/\(a\)/d`
+  looked for the characters `(a)`, `:g/a\zsb/d` found nothing at all, and
+  `:g/\<word\>/d` worked only because the two dialects spell that one the same
+  way. A `\c` or `\C` in the pattern now settles case for them as it does for a
+  search, over `'ignorecase'` and `'smartcase'`.
 - A pattern this editor refuses to translate now says the same thing wherever it
   is typed. A `:s` said `E: … is not supported: …`, the code cut down to a bare
   `E:`; the same refusal through `/` said `E54: E: …`, the code twice. The code

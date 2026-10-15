@@ -536,6 +536,8 @@ so `:g/TODO/d` is "delete the lines with TODO on them" and `:v/^$/d` squeezes th
 blank lines out. Any other `:` command can be the command, `:g/TODO/s/TODO/done/`
 included, and a line with nothing after the pattern prints what matched. `:d` and
 `:p` are there for that, being "delete the current line" and "say what it is".
+The pattern is `/`'s, dialect and all — `\(a\)` is a group, `\<word\>` a whole
+word and `\c` the pattern's own word about case.
 `:&` repeats the last substitute without its flags and `:&&` with them, which is
 how a `:s/x/y/g` gets used on the next line.
 

@@ -176,6 +176,12 @@ and where it is scrolled to. Everything else — the register, the mode, the
 keymap, the options, the command line, the script host — belongs to the session
 and is shared. Design notes: `docs/buffers.md`, `docs/windows.md`.
 
+A `Buffer` is text with a path, and what the text *is* is a kind: a file, or a
+directory listing whose lines are its entries and whose save is the filesystem
+edit those lines spell. A listing is a document like any other — the undo
+history, the searcher and the mouse work on it because it is text — and
+`docs/files.md` is where that was decided.
+
 The window that is up and its document keep their state in the editor's own
 fields; every other one keeps its state in its slot, and switching swaps the two.
 That is why `:bn` and `<C-w>j` need nothing from the rest of the editor: a

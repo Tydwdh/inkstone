@@ -14,6 +14,15 @@
   file used to fail with whatever the platform calls that — `i/o error: 拒绝访问。
   (os error 5)` on Windows — which is a poor answer to a question as clear as
   "show me this folder".
+- Writing a listing is making the directory match it. A name typed in is an entry
+  made (empty, because a line says a name and nothing else — a `/` on the end
+  says a directory), a name changed is a rename, and a name taken out is a
+  removal: a directory goes only when it is empty, so no line can delete a
+  subtree. One name out and one name in is a rename rather than a removal and a
+  creation, which is what keeps the file's content. Every line is checked before
+  anything is applied, a file is only ever created rather than truncated, and a
+  listing that has been edited refuses to be walked away from with `E37` until it
+  is written — the edits to a listing are work nobody has done yet.
 
 ### Fixed
 - `:copen {pattern}` and `:lopen {pattern}` take a *search's* pattern: a group is

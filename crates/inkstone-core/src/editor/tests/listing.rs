@@ -163,6 +163,73 @@ fn gf_opens_a_directory_as_a_listing_too() {
 }
 
 #[test]
+fn a_listing_edited_like_text_makes_files_like_text() {
+    let dir = a_tree("inkstone-listing-write");
+    let mut ed = Editor::for_tests();
+    ed.open_file(&dir).unwrap();
+    assert_eq!(ed.buffer.text(), "docs/\nsub/\nseed.txt\n");
+
+    // Two names typed in at the end, the way a person adds entries to a
+    // listing: a file, and a directory because of the `/`.
+    feed(&mut ed, "Gonew.txt<Esc>otools/<Esc>");
+    assert!(
+        ed.is_dirty(),
+        "a listing that was edited is a document that was"
+    );
+    feed(&mut ed, ":w<CR>");
+    assert!(!ed.is_dirty(), "and writing it is what makes it clean");
+
+    assert!(dir.join("new.txt").is_file());
+    assert!(dir.join("tools").is_dir());
+    assert_eq!(
+        std::fs::metadata(dir.join("new.txt")).unwrap().len(),
+        0,
+        "an entry with no content is an empty file, not a missing one"
+    );
+    // The message is the path, the way it is for a file: the status line is
+    // where the display name goes.
+    assert_eq!(ed.message, format!("\"{}\" written", dir.display()));
+
+    // And taking a name out of the listing takes the entry out of the
+    // directory.
+    feed(&mut ed, "ggdd:w<CR>");
+    assert!(!dir.join("docs").exists());
+    assert!(dir.join("sub").is_dir(), "the rest is where it was");
+}
+
+#[test]
+fn walking_away_from_an_edited_listing_is_refused() {
+    let dir = a_tree("inkstone-listing-dirty");
+    let mut ed = Editor::for_tests();
+    ed.open_file(&dir).unwrap();
+
+    // Take an entry out of the listing, and try to walk into another
+    // directory with the change unwritten.
+    feed(&mut ed, "Gdd");
+    assert!(ed.is_dirty());
+    assert_eq!(ed.buffer.text(), "docs/\nsub/\n");
+    feed(&mut ed, "<CR>");
+    assert_eq!(
+        ed.message, "E37: No write since last change (add ! to override)",
+        "the listing did not go anywhere"
+    );
+    assert_eq!(
+        ed.buffer.text(),
+        "docs/\nsub/\n",
+        "and neither did the edit"
+    );
+    feed(&mut ed, "-");
+    assert!(ed.message.starts_with("E37:"), "{}", ed.message);
+    assert_eq!(ed.buffer.display_name(), shown(&dir));
+
+    // `:w` is what makes it stop refusing, and it does what the lines said.
+    feed(&mut ed, ":w<CR>");
+    assert!(!dir.join("seed.txt").exists());
+    feed(&mut ed, "gg<CR>");
+    assert_eq!(ed.buffer.display_name(), shown(&dir.join("docs")));
+}
+
+#[test]
 fn an_unreadable_directory_is_an_error_and_not_a_listing() {
     // A path that is not there is still a new, empty file — the branch that
     // reads a directory must not swallow it.

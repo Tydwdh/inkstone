@@ -464,12 +464,27 @@ impl Editor {
         // The trailing `/` is how a listing *says* "directory"; it is not part of
         // the name it says it about.
         let target = dir.join(name.strip_suffix('/').unwrap_or(&name));
-        let opened = if target.is_dir() {
-            self.load_file(&target)
-        } else {
-            self.open_file(&target)
-        };
-        if let Err(e) = opened {
+        if target.is_dir() {
+            self.show_listing(&target);
+            return;
+        }
+        if let Err(e) = self.open_file(&target) {
+            self.message = e.to_string();
+        }
+    }
+
+    /// Show `dir` in the listing that is on screen.
+    ///
+    /// The edits to a listing are the filesystem's pending work — writing is what
+    /// makes them true — so walking away from them is the one thing an editor
+    /// must not do quietly. Like `:e` on a modified file, this refuses, and `:w`
+    /// is the answer to the refusal.
+    fn show_listing(&mut self, dir: &Path) {
+        if self.is_dirty() {
+            self.message = "E37: No write since last change (add ! to override)".to_string();
+            return;
+        }
+        if let Err(e) = self.load_file(dir) {
             self.message = e.to_string();
         }
     }
@@ -497,9 +512,7 @@ impl Editor {
         let Some(parent) = parent else {
             return;
         };
-        if let Err(e) = self.load_file(&parent) {
-            self.message = e.to_string();
-        }
+        self.show_listing(&parent);
     }
 
     /// Open what a language server said about this file in a window of its own.

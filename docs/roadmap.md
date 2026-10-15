@@ -3427,6 +3427,54 @@ that "the pattern is the same dialect a search uses, and so is the case rule".
 - **Files:** `editor/lists.rs` (`filter_pattern`, and the places and diagnostics
   call sites).
 
+## Done — a directory opens as a listing
+
+`inkstone .` used to say `i/o error: 拒绝访问。 (os error 5)` on Windows and leave
+the editor on `[No Name]`. The question it asked — "show me this folder" — is one
+every editor with a text interface has answered the same way: emacs has dired,
+vim has netrw, and both of them say a directory is a *buffer holding a list*. It
+is a good answer for a reason worth writing down: the list is text, so every
+command that works on text works on a file manager.
+
+- **What shipped:** `Buffer` has a kind. A `Listing` holds what a directory
+  holds, one entry to a line, directories first and marked with a `/`, with the
+  path kept as it was given and shown in the status line. `<CR>` opens the entry
+  the cursor is on — a directory takes the listing's place, a file opens as a
+  document of its own — and `-` is a new command, `up_directory`: the parent's
+  listing where there is one, vim's "up one line" anywhere else. `:w` applies the
+  lines: names are the identity, so nothing to do if nothing changed; one name
+  out and one in is a rename; removals run before creations; files are made with
+  `create_new`; a directory goes only when empty.
+- **Constraints it had to respect, and how:** every edit goes through
+  `replace_range`, so a listing is a `Buffer` rather than a list window — which
+  is what gives it the undo history, `:g`, `:s`, the searcher and the mouse for
+  nothing, and what makes the file manager *be* the editor rather than sit beside
+  it. A frontend is not told about any of it: a listing is a grid of cells like
+  anything else, and the daemon composes it. And `:w` of a listing must not go
+  through `Buffer::save`'s byte write — both `:w` and `:w!` reach `save_with`,
+  which is where the kind is asked about, so neither path could drift.
+- **What the seam bought:** the whole of the reading side is one branch in
+  `Buffer::from_path`. `:e src`, the file both frontends start with, `:sp src`,
+  a document switch and `gf` on a name that resolves to a directory all arrive
+  through it. `gf` needed one change of its own: it refused a name that was not a
+  file, and a directory is a name a person can put the cursor on.
+- **What the smoke caught:** walking away from a listing that had been edited
+  lost the edits — `<CR>` and `-` navigated a dirty listing with no `E37`, which
+  every other path out of a changed document gives. The refusal is a test now,
+  and it is the reason a listing says `[+]` in the status line like anything
+  else. (The pty harness could not be used to *type* a new entry, since it cannot
+  send `<Esc>`: the smoke renamed one instead, with `:%s/^keep.txt$/eep.txt/` and
+  `:w`, and the file kept its content — which is what says the plan renamed
+  rather than removing and creating.)
+- **Files:** `buffer.rs` (the kind, reading, the plan, applying), `editor/lists.rs`
+  (the two keys), `command.rs` (`up_directory`, and `gf` accepting a directory),
+  `keymap.rs` and the README's table, `editor/tests/listing.rs` (new), and
+  [`files.md`](files.md) (new: the design note).
+- **Left for later:** a tree or a picker, entry attributes, a listing that can
+  make a directory with contents, `:cd`/`:pwd`, and the largest of them — the
+  process buffers (`:!`, `:term`) this seam was built for, which need a design
+  note of their own before they touch the wire.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

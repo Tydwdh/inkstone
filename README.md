@@ -40,7 +40,10 @@ Markdown and HTML (fenced blocks and `<script>` bodies in their own language),
 undo (`u`) and redo (`<C-r>`), with the state a file was written in remembered
 so undoing back to it clears the modified marker, several files at once (`:e`,
 `:ls`, `:b`, `:bn`, `:bp`, `:bd`) in several windows (`:sp`, `:vs`, `<C-w>`,
-resizable and draggable) and tabs (`:tabnew`, `gt`, `:tabclose`), folds (`zf`,
+resizable and draggable) and tabs (`:tabnew`, `gt`, `:tabclose`), a directory
+opened as the listing of what is in it (`<CR>` on an entry, `-` for the
+directory above, and `:w` to make the directory match the lines — a name typed
+in is an entry made, a name taken out is one removed), folds (`zf`,
 `zo`, `zc`, `'foldmethod'`), keyboard macros (`q`, `@`), marks, a jump list
 (`<C-o>`, `<C-i>`) and a change list (`g;`, `g,`), mouse selection and the
 clipboard, command-line editing with history and multi-key insert mappings,

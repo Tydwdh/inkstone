@@ -21,6 +21,7 @@
 //! CRLF, CR, VT, FF, NEL, LS, PS), so the two models can never disagree about
 //! how many lines a buffer has.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ropey::{Rope, RopeSlice};
@@ -43,6 +44,13 @@ pub enum BufferError {
     /// A write was attempted on a buffer that has never had a path.
     #[error("E32: No file name")]
     NoPath,
+    /// The lines of a listing do not spell out something a directory can be.
+    #[error("{0}")]
+    Listing(String),
+    /// A listing was asked to be written somewhere other than where it lists.
+    /// A listing *is* the directory it read: there is nowhere else to put one.
+    #[error("E: a listing is written in place, not as {}", .0.display())]
+    ListingPath(PathBuf),
     /// The file changed on disk since this buffer read it, so writing would throw
     /// away somebody else's work.
     #[error("E13: File exists (add ! to override): {}", .0.display())]
@@ -186,20 +194,128 @@ impl Buffer {
         path: Option<&Path>,
         force: bool,
     ) -> Result<PathBuf, BufferError> {
+        if let BufferKind::Listing { entries } = self.kind.clone() {
+            return self.save_listing(&entries, path, force);
+        }
         let target = match path {
             Some(p) => p.to_path_buf(),
             None => self.path.clone().ok_or(BufferError::NoPath)?,
         };
         if !force {
-            let on_disk = Self::stamp_of(&target);
-            if on_disk.is_some() && on_disk != self.stamp {
-                return Err(BufferError::Changed(target));
-            }
+            self.check_stamp(&target)?;
         }
         std::fs::write(&target, self.text())?;
         self.path = Some(target.clone());
         self.stamp = Self::stamp_of(&target);
         Ok(target)
+    }
+
+    /// Refuse a write when what is on disk is not what this buffer read.
+    ///
+    /// Something else has written the file, and the buffer's text is not what a
+    /// person would expect to be replacing. `:w!` says they know, and writes
+    /// anyway. For a listing the file is a directory, and what "somebody else
+    /// wrote it" means is that its entries are not the ones the lines were
+    /// measured against.
+    fn check_stamp(&self, path: &Path) -> Result<(), BufferError> {
+        let on_disk = Self::stamp_of(path);
+        if on_disk.is_some() && on_disk != self.stamp {
+            return Err(BufferError::Changed(path.to_path_buf()));
+        }
+        Ok(())
+    }
+
+    /// Write a listing out: make the directory match the lines.
+    ///
+    /// `original` is what the directory held when this buffer last read or wrote
+    /// it, which is what tells a rename from a removal and an arrival.
+    fn save_listing(
+        &mut self,
+        original: &[Entry],
+        path: Option<&Path>,
+        force: bool,
+    ) -> Result<PathBuf, BufferError> {
+        let dir = self.path.clone().ok_or(BufferError::NoPath)?;
+        // A listing is the directory it lists. `:w` is how it is written, so a
+        // name of its own is a misunderstanding worth saying out loud rather
+        // than a directory quietly written somewhere else.
+        if let Some(asked) = path {
+            if Some(asked) != self.path.as_deref() {
+                return Err(BufferError::ListingPath(asked.to_path_buf()));
+            }
+        }
+        if !force {
+            self.check_stamp(&dir)?;
+        }
+        let wanted = self.parse_listing()?;
+        let ops = plan_listing(original, &wanted)?;
+        for op in &ops {
+            if let Err(e) = run_listing_op(&dir, op) {
+                // A write that stopped half way leaves a directory no listing
+                // describes. The baseline follows the filesystem rather than the
+                // plan, so that a second `:w` measures against what is really
+                // there — and finishes the job instead of redoing it.
+                self.kind = BufferKind::Listing {
+                    entries: read_dir_entries(&dir).unwrap_or_default(),
+                };
+                return Err(e);
+            }
+        }
+        self.kind = BufferKind::Listing { entries: wanted };
+        self.stamp = Self::stamp_of(&dir);
+        Ok(dir)
+    }
+
+    /// The entries the lines of this listing name, or the first thing wrong with
+    /// them.
+    ///
+    /// A blank line names nothing, so it is skipped: a listing of an empty
+    /// directory holds one — the line model has no other way to say "nothing" —
+    /// and so does a line somebody is still typing. The `/` is the listing's own
+    /// marker for a directory, the same on every platform, and the platform's
+    /// separator is taken as one too, for a person who reaches for the key their
+    /// own file manager uses.
+    fn parse_listing(&self) -> Result<Vec<Entry>, BufferError> {
+        let mut entries: Vec<Entry> = Vec::new();
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        for row in 0..self.line_count() {
+            let line = self.line_string(row);
+            if line.is_empty() {
+                continue;
+            }
+            let (name, is_dir) = split_marker(&line);
+            let entry = Entry {
+                name: name.to_string(),
+                is_dir,
+            };
+            if entry.name.is_empty() {
+                return Err(BufferError::Listing(format!(
+                    "line {}: a name cannot be empty",
+                    row + 1
+                )));
+            }
+            if entry.name == "." || entry.name == ".." {
+                return Err(BufferError::Listing(format!(
+                    "line {}: `.` and `..` are the directory itself",
+                    row + 1
+                )));
+            }
+            if entry.name.contains(['/', std::path::MAIN_SEPARATOR]) {
+                return Err(BufferError::Listing(format!(
+                    "line {}: a name is one name, not a path",
+                    row + 1
+                )));
+            }
+            if seen.insert(entry.name.clone(), row).is_some() {
+                return Err(BufferError::Listing(format!(
+                    "line {}: two lines name `{}`",
+                    row + 1,
+                    entry.name
+                )));
+            }
+            entries.push(entry);
+        }
+        Ok(entries)
     }
 
     // -- accessors ----------------------------------------------------------
@@ -405,6 +521,129 @@ impl Buffer {
         if len == 0 || self.rope.char(len - 1) != '\n' {
             self.rope.insert_char(len, '\n');
         }
+    }
+}
+
+/// The name a listing line writes, and whether it is marked a directory.
+///
+/// A directory is marked with a `/` — the listing's own format, the same on
+/// every platform so that a listing written on one is a listing on another —
+/// and with the platform's separator as well, for a person who reaches for the
+/// key their own file manager uses.
+fn split_marker(line: &str) -> (&str, bool) {
+    if let Some(name) = line.strip_suffix('/') {
+        return (name, true);
+    }
+    if std::path::MAIN_SEPARATOR != '/' {
+        if let Some(name) = line.strip_suffix(std::path::MAIN_SEPARATOR) {
+            return (name, true);
+        }
+    }
+    (line, false)
+}
+
+/// What a save has to do to a directory to make it match the lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ListingOp {
+    /// Make an entry, empty: a file, or a directory when `is_dir`.
+    Create(Entry),
+    /// Take an entry out. A directory goes only when it is empty, which
+    /// `fs::remove_dir` is what enforcing that means.
+    Remove(Entry),
+    /// Put an entry under another name.
+    Rename { from: String, to: String },
+}
+
+/// What has to happen for `dir` to hold `wanted` instead of `original`.
+///
+/// The name is the identity, so a line that keeps its name is nothing to do —
+/// which is what makes reordering a listing an edit with no effect rather than a
+/// storm of renames. One name gone and one arrived is a rename, because that is
+/// the only way a rename can be meant: anything more is somebody who removed
+/// some entries and added others, and pairing them up would be guessing with
+/// their files. (A name kept with its marker changed contradicts itself, and
+/// says so.)
+fn plan_listing(original: &[Entry], wanted: &[Entry]) -> Result<Vec<ListingOp>, BufferError> {
+    for entry in wanted {
+        if let Some(before) = original.iter().find(|one| one.name == entry.name) {
+            if before.is_dir != entry.is_dir {
+                let kind = if before.is_dir { "directory" } else { "file" };
+                let asked = if entry.is_dir { "directory" } else { "file" };
+                return Err(BufferError::Listing(format!(
+                    "`{}` is a {kind}, and one line cannot make it a {asked}",
+                    entry.name
+                )));
+            }
+        }
+    }
+    let removed: Vec<Entry> = original
+        .iter()
+        .filter(|before| !wanted.iter().any(|one| one.name == before.name))
+        .cloned()
+        .collect();
+    let added: Vec<Entry> = wanted
+        .iter()
+        .filter(|one| !original.iter().any(|before| before.name == one.name))
+        .cloned()
+        .collect();
+    let renamed = match (&removed[..], &added[..]) {
+        ([before], [after]) if before.is_dir == after.is_dir => Some(ListingOp::Rename {
+            from: before.name.clone(),
+            to: after.name.clone(),
+        }),
+        _ => None,
+    };
+    if let Some(op) = renamed {
+        return Ok(vec![op]);
+    }
+    let mut ops: Vec<ListingOp> = Vec::new();
+    // Removals go first so that a name is free by the time it is wanted: a
+    // listing may hold names the filesystem must not have two of at once.
+    ops.extend(removed.into_iter().map(ListingOp::Remove));
+    ops.extend(added.into_iter().map(ListingOp::Create));
+    Ok(ops)
+}
+
+/// Do one thing a listing asked for.
+///
+/// A file is created with `create_new`, so that a listing can never truncate
+/// one: an entry the buffer thinks is new but the filesystem does not is a
+/// disagreement to report, not a file to empty.
+fn run_listing_op(dir: &Path, op: &ListingOp) -> Result<(), BufferError> {
+    let attempt = || -> std::io::Result<()> {
+        match op {
+            ListingOp::Create(entry) => {
+                let target = dir.join(&entry.name);
+                if entry.is_dir {
+                    std::fs::create_dir(target)
+                } else {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(target)
+                        .map(|_| ())
+                }
+            }
+            ListingOp::Remove(entry) => {
+                let target = dir.join(&entry.name);
+                if entry.is_dir {
+                    std::fs::remove_dir(target)
+                } else {
+                    std::fs::remove_file(target)
+                }
+            }
+            ListingOp::Rename { from, to } => std::fs::rename(dir.join(from), dir.join(to)),
+        }
+    };
+    attempt().map_err(|e| BufferError::Listing(format!("{}: {}", named(op), e)))
+}
+
+/// The entry an operation is about, for a message that says which one went
+/// wrong.
+fn named(op: &ListingOp) -> String {
+    match op {
+        ListingOp::Create(entry) | ListingOp::Remove(entry) => entry.name.clone(),
+        ListingOp::Rename { to, .. } => to.clone(),
     }
 }
 
@@ -757,5 +996,213 @@ mod tests {
         let buf = Buffer::from_path(&dir.join("nothing.txt")).unwrap();
         assert!(!buf.is_listing());
         assert_eq!(buf.text(), "\n");
+    }
+
+    /// Replace a listing's lines with what a person would have typed.
+    fn listing_of(dir: &Path) -> Buffer {
+        Buffer::from_path(dir).unwrap()
+    }
+
+    fn retype(buf: &mut Buffer, text: &str) {
+        let end = buf.len_chars();
+        buf.replace_range(0, end, text);
+    }
+
+    #[test]
+    fn a_listing_writes_the_entries_its_lines_name() {
+        let dir = a_directory("inkstone-buffer-listing-write");
+        let mut buf = listing_of(&dir);
+        retype(
+            &mut buf,
+            "docs/\nsrc/\nCargo.toml\nREADME.md\napp.rs\ntools/\n",
+        );
+
+        buf.save(None).unwrap();
+
+        assert!(dir.join("app.rs").is_file());
+        assert_eq!(std::fs::metadata(dir.join("app.rs")).unwrap().len(), 0);
+        assert!(dir.join("tools").is_dir());
+        assert_eq!(
+            buf.text(),
+            "docs/\nsrc/\nCargo.toml\nREADME.md\napp.rs\ntools/\n"
+        );
+        // And the old entries are still there: a listing writes what it says.
+        assert!(dir.join("docs").is_dir());
+    }
+
+    #[test]
+    fn one_name_out_and_one_name_in_is_a_rename() {
+        let dir = a_directory("inkstone-buffer-listing-rename");
+        let mut buf = listing_of(&dir);
+        retype(&mut buf, "docs/\nsrc/\nCargo.toml\nREADME.txt\n");
+
+        buf.save(None).unwrap();
+
+        assert!(!dir.join("README.md").exists());
+        assert!(dir.join("README.txt").is_file());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("README.txt")).unwrap(),
+            "# hi\n",
+            "a rename keeps what the file held"
+        );
+    }
+
+    #[test]
+    fn a_listing_removes_what_it_no_longer_names() {
+        let dir = a_directory("inkstone-buffer-listing-remove");
+        let mut buf = listing_of(&dir);
+        retype(&mut buf, "docs/\nsrc/\n");
+
+        buf.save(None).unwrap();
+
+        assert!(!dir.join("README.md").exists());
+        assert!(!dir.join("Cargo.toml").exists());
+        assert!(dir.join("docs").is_dir(), "what is still named stays");
+    }
+
+    #[test]
+    fn a_directory_goes_only_when_it_is_empty() {
+        let dir = a_directory("inkstone-buffer-listing-nonempty");
+        std::fs::write(dir.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+        let mut buf = listing_of(&dir);
+        // `docs` is empty and goes; `src` is not, so the write stops there and
+        // says which entry it stopped on.
+        retype(&mut buf, "Cargo.toml\nREADME.md\n");
+
+        let err = buf.save(None).unwrap_err().to_string();
+
+        assert!(err.starts_with("src: "), "{err}");
+        assert!(
+            dir.join("src").join("main.rs").is_file(),
+            "nothing was lost"
+        );
+        assert!(
+            !dir.join("docs").exists(),
+            "what the plan did reach is done"
+        );
+        assert!(
+            dir.join("README.md").is_file(),
+            "and what it did not, is not"
+        );
+        assert!(dir.join("Cargo.toml").is_file());
+    }
+
+    #[test]
+    fn writing_the_same_listing_twice_does_nothing_the_second_time() {
+        let dir = a_directory("inkstone-buffer-listing-twice");
+        let mut buf = listing_of(&dir);
+        retype(&mut buf, "docs/\nsrc/\nCargo.toml\nREADME.md\napp.rs\n");
+        buf.save(None).unwrap();
+        // A second save plans nothing, so the `create_new` of `app.rs` is never
+        // reached — which is what makes it safe to have used it.
+        buf.save(None).unwrap();
+        assert!(dir.join("app.rs").is_file());
+    }
+
+    #[test]
+    fn a_listing_refuses_a_line_that_is_not_a_name() {
+        let dir = a_directory("inkstone-buffer-listing-refusals");
+
+        let cases = [
+            (
+                "docs/\nsrc/\nsub/name\n",
+                "line 3: a name is one name, not a path",
+            ),
+            (
+                "docs/\nsrc/\n..\n",
+                "line 3: `.` and `..` are the directory itself",
+            ),
+            ("docs/\nsrc/\ndocs\n", "line 3: two lines name `docs`"),
+            // A line that is only the marker names a directory called nothing.
+            ("docs/\nsrc/\n/\n", "line 3: a name cannot be empty"),
+        ];
+        for (text, expected) in cases {
+            let mut buf = listing_of(&dir);
+            retype(&mut buf, text);
+            let err = buf.save(None).unwrap_err().to_string();
+            assert_eq!(err, expected);
+        }
+        // Nothing was done on the way to any of those refusals.
+        assert!(dir.join("docs").is_dir());
+        assert!(!dir.join("sub").exists());
+    }
+
+    #[test]
+    fn a_line_cannot_change_what_kind_of_thing_an_entry_is() {
+        let dir = a_directory("inkstone-buffer-listing-kind");
+        let mut buf = listing_of(&dir);
+        retype(&mut buf, "docs\nsrc/\nCargo.toml\nREADME.md\n");
+
+        let err = buf.save(None).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            "`docs` is a directory, and one line cannot make it a file"
+        );
+    }
+
+    #[test]
+    fn a_listing_is_written_in_place_and_nowhere_else() {
+        let dir = a_directory("inkstone-buffer-listing-in-place");
+        let mut buf = listing_of(&dir);
+        let elsewhere = dir.join("elsewhere");
+
+        let err = buf.save(Some(&elsewhere)).unwrap_err().to_string();
+        assert_eq!(
+            err,
+            format!(
+                "E: a listing is written in place, not as {}",
+                elsewhere.display()
+            )
+        );
+        assert!(!elsewhere.exists());
+        // The name it already has is the one it is written under.
+        buf.save(Some(&dir)).unwrap();
+    }
+
+    #[test]
+    fn a_plan_pairs_only_one_arrival_with_one_removal() {
+        let before = |name: &str, is_dir: bool| Entry {
+            name: name.to_string(),
+            is_dir,
+        };
+        let original = vec![before("one.txt", false), before("two.txt", false)];
+
+        // Two gone and two arrived is two of each, not two renames: pairing
+        // them up would be guessing which name became which.
+        let wanted = vec![before("three.txt", false), before("four.txt", false)];
+        assert_eq!(
+            plan_listing(&original, &wanted).unwrap(),
+            vec![
+                ListingOp::Remove(before("one.txt", false)),
+                ListingOp::Remove(before("two.txt", false)),
+                ListingOp::Create(before("three.txt", false)),
+                ListingOp::Create(before("four.txt", false)),
+            ]
+        );
+
+        // One of each is a rename, and nothing else is planned.
+        let wanted = vec![before("one.txt", false), before("three.txt", false)];
+        assert_eq!(
+            plan_listing(&original, &wanted).unwrap(),
+            vec![ListingOp::Rename {
+                from: "two.txt".to_string(),
+                to: "three.txt".to_string(),
+            }]
+        );
+
+        // A directory and a file are never a rename of one another: the entry
+        // that is left is removed and the entry that arrived is made.
+        let wanted = vec![before("one.txt", false), before("three", true)];
+        assert_eq!(
+            plan_listing(&original, &wanted).unwrap(),
+            vec![
+                ListingOp::Remove(before("two.txt", false)),
+                ListingOp::Create(before("three", true)),
+            ]
+        );
+
+        // The same listing in a different order is not an edit at all.
+        let unwanted = vec![before("two.txt", false), before("one.txt", false)];
+        assert_eq!(plan_listing(&original, &unwanted).unwrap(), Vec::new());
     }
 }

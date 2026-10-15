@@ -21,6 +21,7 @@ mod options;
 mod prompt;
 mod registers;
 mod search;
+mod terminal;
 mod undo;
 mod vimgrep;
 mod visual;

@@ -57,6 +57,7 @@ mod lsp;
 mod options;
 mod pointer;
 mod prompt;
+mod terminal;
 mod view;
 mod visual;
 mod windows;
@@ -1242,6 +1243,13 @@ pub struct Editor {
     pub(crate) job: Option<jobs::Job>,
     /// Set by `:kill`, taken by the session that owns the process.
     pub(crate) job_kill: bool,
+    /// The terminal that is running, if one is: the program, its size, and what
+    /// the session has been told about it.
+    pub(crate) terminal: Option<terminal::Terminal>,
+    /// Bytes waiting for the program: keys, and the answers to its questions.
+    pub(crate) terminal_input: Vec<u8>,
+    /// Set by `:kill`, taken by the session that owns the pty.
+    pub(crate) terminal_kill: bool,
     /// The last command that changed something, with the arguments it was run
     /// with: `.` runs it again.
     pub(crate) last_command: Option<(String, Vec<Param>)>,
@@ -1378,6 +1386,9 @@ impl Editor {
             lsp_ask: None,
             job: None,
             job_kill: false,
+            terminal: None,
+            terminal_input: Vec::new(),
+            terminal_kill: false,
             last_command: None,
             last_insert: None,
             insert_log: None,

@@ -316,6 +316,13 @@ fn draw_pane(
     if rect.width == 0 || rect.height == 0 || rect.y >= grid.height {
         return;
     }
+    // A terminal's colours are the program's, and its cursor is where the
+    // program put it — which is the whole of what a terminal is, and the reason
+    // it is drawn from the screen rather than from the text.
+    if let Some(screen) = pane.buffer.terminal() {
+        draw_terminal_pane(grid, view, pane, screen, cursor_at);
+        return;
+    }
     let gutter = gutter_width(pane.buffer.line_count(), view.number);
     let layout = TextLayout {
         x: rect.x,
@@ -390,21 +397,74 @@ fn draw_pane(
         }
     }
 
-    if rect.height >= 1 {
-        let status_row = rect.y + rect.height - 1;
-        if status_row >= grid.height {
-            return;
-        }
-        fill_row(grid, status_row, rect.x, rect.width, ATTR_REVERSE);
-        draw_text(
-            grid,
-            rect.x,
-            status_row,
-            &pane.status,
-            rect.width as usize,
-            ATTR_REVERSE,
-        );
+    draw_status_row(grid, pane);
+}
+
+/// The last row of a window: the status line, reverse video, edge to edge.
+fn draw_status_row(grid: &mut Grid, pane: &Pane<'_>) {
+    let rect = pane.rect;
+    if rect.height < 1 {
+        return;
     }
+    let status_row = rect.y + rect.height - 1;
+    if status_row >= grid.height {
+        return;
+    }
+    fill_row(grid, status_row, rect.x, rect.width, ATTR_REVERSE);
+    draw_text(
+        grid,
+        rect.x,
+        status_row,
+        &pane.status,
+        rect.width as usize,
+        ATTR_REVERSE,
+    );
+}
+
+/// A pane whose buffer is a program's screen.
+///
+/// The text is the same text the ordinary path would draw — a buffer's lines
+/// *are* the screen's rows — but every cell carries the colours the program
+/// chose, and the cursor is the one the program moved rather than the one a
+/// person did.
+fn draw_terminal_pane(
+    grid: &mut Grid,
+    _view: &View<'_>,
+    pane: &Pane<'_>,
+    screen: &crate::terminal::Screen,
+    cursor_at: &mut Option<(u16, u16)>,
+) {
+    let rect = pane.rect;
+    // The last row of a window is its status line, as everywhere else.
+    let text_rows = rect.height.saturating_sub(1) as usize;
+    let width = rect.width as usize;
+    for row in 0..text_rows.min(screen.rows()) {
+        let y = rect.y + row as u16;
+        if y >= grid.height {
+            break;
+        }
+        for col in 0..width.min(screen.cols()) {
+            let cell = screen.cell(col, row);
+            if cell.wide {
+                // The cell after a wide character is its other half, and the
+                // half that was drawn is the one that carries the text.
+                continue;
+            }
+            let wide = screen.cell(col + 1, row).wide;
+            let mut drawn = Cell::new(cell.ch.to_string());
+            drawn.fg = cell.attr.fg;
+            drawn.bg = cell.attr.bg;
+            drawn.attrs = cell.attr.attrs;
+            grid.put_grapheme(rect.x + col as u16, y, if wide { 2 } else { 1 }, drawn);
+        }
+        if pane.current && screen.cursor().1 == row {
+            let (cursor_col, _) = screen.cursor();
+            if cursor_col < width {
+                *cursor_at = Some((rect.x + cursor_col as u16, y));
+            }
+        }
+    }
+    draw_status_row(grid, pane);
 }
 
 /// How many items the popup shows at once.

@@ -47,6 +47,10 @@ pub enum BufferError {
     /// The lines of a listing do not spell out something a directory can be.
     #[error("{0}")]
     Listing(String),
+    /// A write was attempted on a terminal, which is a program's screen rather
+    /// than a document.
+    #[error("E: a terminal is a program's screen, not a file")]
+    Terminal,
     /// A listing was asked to be written somewhere other than where it lists.
     /// A listing *is* the directory it read: there is nowhere else to put one.
     #[error("E: a listing is written in place, not as {}", .0.display())]
@@ -58,7 +62,7 @@ pub enum BufferError {
 }
 
 /// An editable document.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Buffer {
     rope: Rope,
     path: Option<PathBuf>,
@@ -76,8 +80,10 @@ pub struct Buffer {
 /// A document holds a file, and writing it writes those bytes. A listing holds
 /// what a directory holds, one entry to a line, and writing it makes the
 /// directory match the text — which is what makes a file manager out of an
-/// editor whose only interface is text.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// editor whose only interface is text. A terminal holds what a program has
+/// drawn, and it is the one kind whose text nobody edits: the program rewrites
+/// it, and a save would have nowhere to put it.
+#[derive(Debug)]
 pub(crate) enum BufferKind {
     /// The text is the file the path names.
     File,
@@ -86,6 +92,11 @@ pub(crate) enum BufferKind {
     /// the same fact `stamp` is for a file, and the baseline a save is measured
     /// against.
     Listing { entries: Vec<Entry> },
+    /// The text is a program's screen: the rows are its lines, and the screen is
+    /// the truth they are a view of.
+    Terminal {
+        screen: Box<crate::terminal::Screen>,
+    },
 }
 
 /// One entry of a listing, as the directory last looked.
@@ -201,7 +212,13 @@ impl Buffer {
         path: Option<&Path>,
         force: bool,
     ) -> Result<PathBuf, BufferError> {
-        if let BufferKind::Listing { entries } = self.kind.clone() {
+        if self.is_terminal() {
+            // A terminal is a program's screen. There is nothing to write and
+            // nowhere to write it: the program owns it.
+            return Err(BufferError::Terminal);
+        }
+        if let BufferKind::Listing { entries } = &self.kind {
+            let entries = entries.clone();
             return self.save_listing(&entries, path, force);
         }
         let target = match path {
@@ -341,6 +358,60 @@ impl Buffer {
     /// made it, because only they know.
     pub(crate) fn set_title(&mut self, title: &str) {
         self.title = Some(title.to_string());
+    }
+
+    /// A buffer showing what a program has drawn.
+    ///
+    /// There is no path: a terminal is not a file, and the *screen* is the
+    /// truth — the text is a view of it, refreshed whenever the program writes.
+    pub(crate) fn from_terminal(program: &str, screen: crate::terminal::Screen) -> Self {
+        let mut buf = Self {
+            rope: Rope::from_str(&screen.text()),
+            path: None,
+            stamp: None,
+            kind: BufferKind::Terminal {
+                screen: Box::new(screen),
+            },
+            title: Some(format!("!{program}")),
+        };
+        buf.normalize();
+        buf
+    }
+
+    /// The screen, when this buffer is a terminal's.
+    pub(crate) fn terminal(&self) -> Option<&crate::terminal::Screen> {
+        match &self.kind {
+            BufferKind::Terminal { screen } => Some(screen),
+            BufferKind::File | BufferKind::Listing { .. } => None,
+        }
+    }
+
+    /// Whether this buffer is a program's screen.
+    pub(crate) fn is_terminal(&self) -> bool {
+        matches!(self.kind, BufferKind::Terminal { .. })
+    }
+
+    /// Let the program draw: feed it bytes, and take the screen as the new text.
+    ///
+    /// The text is *replaced*, not edited, and that is the one place a change
+    /// does not go through the undo history: a program redrawing its screen is
+    /// not an edit somebody made, and a `u` that scrolled a terminal back would
+    /// be a `u` that undid the program's work rather than a person's.
+    pub(crate) fn terminal_feed(&mut self, bytes: &[u8]) {
+        let BufferKind::Terminal { screen } = &mut self.kind else {
+            return;
+        };
+        screen.feed(bytes);
+        self.rope = Rope::from_str(&screen.text());
+    }
+
+    /// What the program asked to be told, if anything: the answer to "where is
+    /// the cursor".
+    pub(crate) fn terminal_reply(&mut self) -> Option<Vec<u8>> {
+        match &mut self.kind {
+            BufferKind::Terminal { screen } => screen.take_reply(),
+            BufferKind::File | BufferKind::Listing { .. } => None,
+        }
     }
 
     /// Whether this buffer lists a directory rather than holding a file.

@@ -36,6 +36,7 @@ fn command_name(cmd: &str) -> Option<&'static str> {
         "lclose" => "close_diagnostics",
         "clearjumps" => "clear_jumps",
         "kill" => "kill_command",
+        "term" | "terminal" => "terminal",
         "p" | "print" => "print_line",
         "w" => "save",
         "w!" => "save_force",

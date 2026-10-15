@@ -239,6 +239,7 @@ impl CommandRegistry {
         open_place,
         up_directory,
         kill_command,
+        terminal,
         shell,
         normal,
         complete_next,
@@ -1801,7 +1802,22 @@ fn normal(editor: &mut Editor, params: &[Param]) -> Result<()> {
 /// thread of its own is that the editor goes on working while it runs — so
 /// stopping one has to be said out loud.
 fn kill_command(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    // A terminal is a program too, and `:kill` is the one way to say stop to
+    // either of them.
+    if editor.terminal_running() {
+        editor.kill_terminal();
+        return Ok(());
+    }
     editor.kill_job();
+    Ok(())
+}
+
+/// `:term [program]` — a program that draws, in a window of its own.
+///
+/// The one command that is not about a file or a list: what it opens is a
+/// pseudo-terminal, and the buffer it shows is the program's screen.
+fn terminal(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    editor.open_terminal(str_param(params));
     Ok(())
 }
 

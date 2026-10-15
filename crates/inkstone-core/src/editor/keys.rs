@@ -16,6 +16,20 @@ impl Editor {
         // — which is why it is handled before the mode is looked at. The window
         // stays where it is: vim's own note is "there is no redraw, thus the
         // window will remain visible".
+        // A terminal's keys are the program's, not the editor's — that is what a
+        // terminal is — and `<C-\>` is the one exception: the way back to the
+        // editor's own keys. `<Esc>` cannot be it, because a program that draws
+        // needs `<Esc>`.
+        if self.buffer.is_terminal() && self.mode == Mode::Insert {
+            if key.is_ctrl() && key.code == KeyCode::Char('\\') {
+                self.mode = Mode::Normal;
+                self.message.clear();
+                self.redraw = true;
+                return;
+            }
+            self.terminal_keys(&key);
+            return;
+        }
         if self.in_history_window() && key.code == KeyCode::Char('c') && key.is_ctrl() {
             self.continue_from_history_window();
             return;

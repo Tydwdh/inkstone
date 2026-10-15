@@ -21,8 +21,10 @@ use inkstone_rpc::{read_client_msg, write_server_msg, ClientMsg, Grid, ServerMsg
 use serde_json::Value;
 
 mod job;
+mod terminal;
 
 use job::Job;
+use terminal::Terminal;
 
 /// How the daemon should find its Lua configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +72,8 @@ pub struct Session {
     /// thread that waits for it. See `job.rs` for why none of it is in the
     /// kernel.
     running: Option<Job>,
+    /// The program that is running on a pty, if one is: `:term`'s other half.
+    terminal: Option<Terminal>,
 }
 
 /// A language server, and what the session has to remember about talking to it.
@@ -593,6 +597,7 @@ impl Session {
             lsp: None,
             lsp_tried_for: None,
             running: None,
+            terminal: None,
         }
     }
 
@@ -1107,6 +1112,7 @@ impl Session {
         );
         self.tick_lsp();
         self.tick_job();
+        self.tick_terminal();
         self.ask_resolve();
         let after = (
             self.editor.message.clone(),
@@ -1169,6 +1175,49 @@ impl Session {
     pub fn stop_job(&mut self) {
         if let Some(running) = &self.running {
             running.kill();
+        }
+        if let Some(terminal) = &mut self.terminal {
+            terminal.kill();
+        }
+    }
+
+    /// The pty behind `:term`: started, fed, written to, resized and stopped.
+    ///
+    /// Every one of those is a few bytes between the kernel and this, and none
+    /// of them is on the wire: a terminal's screen is a buffer like any other,
+    /// and a frontend draws it the way it draws everything else.
+    fn tick_terminal(&mut self) {
+        if self.terminal.is_none() {
+            if let Some(program) = self.editor.take_terminal_request() {
+                let (cols, rows) = self.editor.terminal_size();
+                match Terminal::spawn(&program, cols, rows) {
+                    Ok(terminal) => self.terminal = Some(terminal),
+                    Err(error) => {
+                        self.editor.terminal_exited(None);
+                        self.editor.message = format!("E: cannot start a terminal: {error}");
+                    }
+                }
+            }
+        }
+        let Some(terminal) = self.terminal.as_mut() else {
+            return;
+        };
+        if self.editor.take_terminal_kill() {
+            terminal.kill();
+        }
+        let chunks = terminal.drain();
+        for chunk in chunks {
+            self.editor.terminal_output(&chunk);
+        }
+        if let Some(bytes) = self.editor.take_terminal_input() {
+            terminal.write(bytes);
+        }
+        if let Some((cols, rows)) = self.editor.take_terminal_resize() {
+            terminal.resize(cols, rows);
+        }
+        if let Some(status) = terminal.exited() {
+            self.terminal = None;
+            self.editor.terminal_exited(status);
         }
     }
 

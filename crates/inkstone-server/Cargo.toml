@@ -22,3 +22,4 @@ inkstone-rpc.workspace = true
 crossbeam-channel.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+portable-pty = "0.9.0"

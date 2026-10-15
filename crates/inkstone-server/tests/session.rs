@@ -943,6 +943,45 @@ end)
     );
 }
 
+#[test]
+fn a_terminal_runs_a_program_and_shows_what_it_drew() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 60, rows: 10 }],
+    );
+
+    // `:term echo hi` — a program on a real pty, which is the whole point: it is
+    // a terminal it is talking to, not a pipe.
+    let mut keys = type_str(":term echo hi");
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen).iter().any(|row| row.contains("hi"))
+        }),
+        "the program's output is on the screen: {:?}",
+        rows(&screen)
+    );
+    assert!(
+        rows(&screen).iter().any(|row| row.contains("TERMINAL")),
+        "and the status line says whose keys these are: {:?}",
+        rows(&screen)
+    );
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen)
+                .iter()
+                .any(|row| row.contains("process exited"))
+        }),
+        "and when it is gone, that is in the scrollback too: {:?}",
+        rows(&screen)
+    );
+}
+
 /// The real thing: spawn `inkstone-server`, talk to it over its pipes, then check
 /// that the file it wrote is on disk.
 #[test]

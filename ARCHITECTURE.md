@@ -55,6 +55,7 @@ the child's stdin/stdout. There is exactly one writer to each direction.
 | `inkstone-server` | main | the `Editor`, the output stream, the Lua VM |
 | `inkstone-server` | `inkstone-server-rpc-reader` | blocking read of client frames |
 | `inkstone-server` | `inkstone-job-*` | one running command: its shell, its three pipes and the thread that waits for them |
+| `inkstone-server` | `inkstone-terminal-read` / `-write` | `:term`'s pty: one thread reading what the program drew, one writing the keys to it |
 
 The editor never crosses a thread boundary, so it needs no locks. The only
 shared state is messages in a `crossbeam-channel` — and the one `AtomicBool` that
@@ -183,11 +184,12 @@ and where it is scrolled to. Everything else — the register, the mode, the
 keymap, the options, the command line, the script host — belongs to the session
 and is shared. Design notes: `docs/buffers.md`, `docs/windows.md`.
 
-A `Buffer` is text with a path, and what the text *is* is a kind: a file, or a
+A `Buffer` is text with a path, and what the text *is* is a kind: a file, a
 directory listing whose lines are its entries and whose save is the filesystem
-edit those lines spell. A listing is a document like any other — the undo
-history, the searcher and the mouse work on it because it is text — and
-`docs/files.md` is where that was decided.
+edit those lines spell, or a terminal whose lines are a program's screen. All
+three are documents like any other — the undo history, the searcher and the
+mouse work on them because they are text — and `docs/files.md` and
+`docs/terminal.md` are where those were decided.
 
 The window that is up and its document keep their state in the editor's own
 fields; every other one keeps its state in its slot, and switching swaps the two.
@@ -223,6 +225,11 @@ Three things make that exact:
   replacement, and the trailing-newline invariant is restored once, at the end
   of it. Two operations would repair the newline in between, and a `dd` on the
   last line of a file would come back with an extra empty line.
+  There is exactly one exception, and it has a reason: a terminal's text is
+  *replaced* wholesale when the program draws, without a step, because a program
+  redrawing its screen is not an edit somebody made — a `u` that scrolled a
+  terminal back would undo the program's work rather than a person's. See
+  [`docs/terminal.md`](docs/terminal.md).
 - **A step that removes the buffer's last terminator owns the newline the
   invariant hands back** (`Change::planned`). `remove(0, len)` on `"abc\n"`
   leaves `"\n"`, so the step is "`abc\n` became `\n`" — and undo and redo are

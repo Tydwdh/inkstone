@@ -406,6 +406,13 @@ impl Editor {
     /// selection covers, which is the difference between taking characters and
     /// taking whole lines.
     pub(super) fn mode_label(&self) -> String {
+        // A terminal's mode is not about editing: while the keys are the
+        // program's, saying so is the only way to know which of the two a
+        // keystroke is about to go to. In normal mode they are the editor's
+        // again, and the label says what they are.
+        if self.buffer.is_terminal() && self.mode == Mode::Insert {
+            return "TERMINAL".to_string();
+        }
         match (self.mode, self.selection) {
             (Mode::Visual, Some(selection)) => {
                 format!("{}{}", self.mode.name(), selection.kind.name())

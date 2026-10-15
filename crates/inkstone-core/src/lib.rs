@@ -33,6 +33,7 @@ pub mod screen;
 pub mod search;
 pub mod settings;
 pub mod substitute;
+pub mod terminal;
 mod vimgrep;
 
 pub use buffer::{Buffer, BufferError};

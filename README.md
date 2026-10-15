@@ -45,7 +45,8 @@ opened as the listing of what is in it (`<CR>` on an entry, `-` for the
 directory above, and `:w` to make the directory match the lines — a name typed
 in is an entry made, a name taken out is one removed), running commands
 (`:!cmd` with its output in a window of its own, `:r !cmd` to read one in,
-`:%!fmt` to filter the lines through one, `:kill` to stop one), folds (`zf`,
+`:%!fmt` to filter the lines through one, `:kill` to stop one), a program that draws in a terminal of its own (`:term`,
+with the keys going to it until `<C-\>` gives them back), folds (`zf`,
 `zo`, `zc`, `'foldmethod'`), keyboard macros (`q`, `@`), marks, a jump list
 (`<C-o>`, `<C-i>`) and a change list (`g;`, `g,`), mouse selection and the
 clipboard, command-line editing with history and multi-key insert mappings,

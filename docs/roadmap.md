@@ -3523,6 +3523,49 @@ runs, and the answer arrives at a tick. `docs/jobs.md` is the design note.
   does; interactive input; `:w !cmd`; and reading a build's errors into the list
   of places, which is the one that would turn `:!cargo build` into a workflow.
 
+## Done — a terminal
+
+`:term` — a program whose output is a screen rather than a document, and the last
+thing [`jobs.md`](jobs.md) promised. `docs/terminal.md` was written before any of
+it, as the rule asks, and it was right about the important part: this one did
+*not* change the wire.
+
+- **What shipped:** `:term [program]` opens a program on a pty and shows its
+  screen in a window below, in a buffer of its own. The keys are the program's
+  from the first moment — insert mode *is* the program's — and `<C-\>` is the
+  way back to the editor's, which is why the status line says `-- TERMINAL --`
+  while that is true. `:kill` stops it, a resize tells it the new size, and when
+  it exits the screen keeps everything it drew — that is the scrollback, and the
+  reason a terminal in a buffer is worth having — with `[process exited N]` at
+  the end and the keys back with the editor.
+- **Constraints it had to respect, and how:** the kernel owns the screen, because
+  a screen is what a buffer is: rows of cells with a cursor, which is the grid
+  the daemon composes and the frontends draw. So the pty is in the session (with
+  the job runner it shares its shape with) and the *parser* is in the kernel
+  (`vte`), and what crosses between them is three things: a program to start,
+  bytes to write, bytes it wrote. Neither frontend changed a line — which was the
+  test of the whole design, and it passed.
+- **The one invariant it bends:** a terminal's text is replaced wholesale when
+  the program draws, without an undo step. `ARCHITECTURE.md` says why: a program
+  redrawing its screen is not an edit somebody made, and a `u` that scrolled a
+  terminal back would undo the program's work rather than a person's.
+- **What the tests caught:** the wrap model — a character printed in the last
+  column parks the cursor *there* with the wrap pending, so a program that fills
+  the final cell does not scroll early and one that prints past it does not
+  overwrite; that `CSI C` moves right from the cursor rather than to a column;
+  and that the alternate screen saves the cursor as well as the cells, or a
+  full-screen program's exit puts the shell's cursor somewhere it never was.
+- **Files:** `terminal.rs` (new: the screen and the `vte` callbacks),
+  `editor/terminal.rs` (new: `:term`, the keys, the exit), `buffer.rs` (the third
+  kind), `render.rs` (a pane drawn from the screen), `keys.rs` (whose keys these
+  are), `inkstone-server/src/terminal.rs` (new: the pty),
+  `editor/tests/terminal.rs` (new), and `tests/session.rs` — which runs a real
+  program on a real pty, because that is the point.
+- **Left for later:** scroll regions (`CSI r`), the other questions a program can
+  ask, mouse reporting, bracketed paste, and image protocols. Verified by hand
+  over a pty as well: a real `cmd.exe` running in a window of the editor, typed
+  at, answering, and exiting into its own scrollback.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
@@ -3536,21 +3579,6 @@ Each one should get its own design note first if it wants to change
 are, which is the point of the split. [`rendering.md`](rendering.md) covers
 everything a frontend needs, [`selection.md`](selection.md) the pointer and the
 clipboard.
-
-### 2. A terminal, and the note is already written
-
-`:term` — a program whose output is a screen rather than a document, and the
-last thing [`jobs.md`](jobs.md) promised. [`terminal.md`](terminal.md) is the
-design note the rule asks for, and it concludes that this one does *not* want to
-change the wire: a frontend draws a grid of cells with attribute bits already,
-and where those bits come from — the highlighter or an escape sequence — is
-decided in `compose`, in the kernel.
-
-What it needs is a pseudo-terminal (ConPTY on Windows, `openpty` on Unix), a
-parser for what a terminal writes (`vte`), and a third `BufferKind` whose
-attributes are a side table rather than the syntax colours. The running, the
-typing and the scrollback are `jobs.md`'s machinery and the buffer's own lines.
-It should be split again the moment a frontend has to know anything about it.
 
 ## Known gaps that are not features
 

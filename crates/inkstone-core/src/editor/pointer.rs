@@ -11,6 +11,10 @@ impl Editor {
     /// The terminal changed size.
     pub fn handle_resize(&mut self, cols: u16, rows: u16) {
         self.viewport.resize(cols, rows);
+        // A program that draws was told how big its terminal is, and it needs to
+        // be told again: a full-screen program that keeps painting an old size is
+        // wrong in a way a person sees immediately.
+        self.resize_terminal();
         self.reposition();
         self.redraw = true;
     }

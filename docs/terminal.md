@@ -59,6 +59,22 @@ What does travel is what already travels: keys go out (a frontend's keys reach
 the kernel as keys today), the screen comes back as rows, and a resize is a
 resize. There is no new message.
 
+## The two decisions this note did not have
+
+**The keys.** A terminal's keys are the program's — that is what a terminal is —
+and the way back to the editor's is `<C-\>`, which is vim's escape too. `<Esc>`
+cannot be it: a program that draws needs `<Esc>`. So a terminal buffer's *insert*
+mode is the program's and its *normal* mode is the editor's, which is what the
+status line says: `-- TERMINAL --` while the keys are the program's, and the
+ordinary label once they are not.
+
+**The text.** The screen is the truth and the buffer's lines are a view of it,
+rewritten whenever the program draws. That is the one place a change does not go
+through `Editor::replace_range`, and the reason is in `ARCHITECTURE.md`: a
+program redrawing its screen is not an edit somebody made, so it must not be a
+`u` step — a `u` that scrolled a terminal back would undo the program's work
+rather than a person's.
+
 ## What reuses what
 
 - **Running it** is `docs/jobs.md` with a different sink. The job's `Call` action
@@ -75,21 +91,36 @@ resize. There is no new message.
   and the window's when a person looks away — which is a question the kernel
   already answers for every other kind of document.
 
-## What it costs, honestly
+## What it cost
 
-A VT parser that is *correct* is the hard part, and `vte` is the answer to it;
-the screen model on top — cells, attributes, scroll regions, the alternate
-screen, wide characters — is a few hundred lines and a lot of small decisions
-(what a `\t` does at the right margin; whether a `\r\n` pair is two operations).
-It is a project of its own, not a step of this one, and it should be split
-again the moment it grows a second frontend concern: **the frontends should not
-have to know**, and if one of them does, something has gone into the wrong layer.
+`vte` is the parser — the hard part, and the reason not to write one — and it
+lives in the *kernel*, where the screen is: the session feeds it bytes and the
+kernel keeps the screen, because a screen is what a buffer is. `portable-pty`
+opens the pty, in the session, beside the job runner it shares its shape with.
+
+The screen model on top is a few hundred lines and a lot of small decisions, and
+the tests are where they were made: a character printed in the last column parks
+the cursor there with the wrap *pending* (or a program filling the final cell
+overwrites it); `CSI C` moves right from where the cursor is rather than to a
+column; the alternate screen saves the cursor as well as the cells; and a wide
+character takes two cells, the second of which carries no text of its own.
+
+What is *not* implemented is a scroll region (`CSI r`): a program that sets one
+scrolls the whole screen instead. That is wrong in a way a person sees — a status
+bar pinned to the bottom of a full-screen program scrolls away — rather than a
+way that is silent, and it is the first thing to add when somebody needs it.
+
+**The frontends were told nothing.** Not one line changed in either of them: a
+terminal is a grid of cells, and so is everything else. If that ever stops being
+true, something has gone into the wrong layer.
 
 ## What is not in it
 
 - No multiplexing, no sessions, no detaching.
 - No mouse reporting to the program (`docs/selection.md` already says this is
   left for later), and no bracketed paste.
+- No scroll region, and no answer to the other questions a program can ask
+  (`CSI n` beyond "where is the cursor").
 - No image protocols (sixel, kitty), no hyperlinks.
 - No scrollback limit: the buffer is the scrollback, and a command that prints
   for an hour fills the buffer for an hour. That is a real hazard and the first

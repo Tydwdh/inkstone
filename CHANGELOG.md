@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- `:term [program]` runs a program that *draws*: on a pty of its own, with its
+  screen in a window of the editor, in a buffer of its own. The keys are the
+  program's from the first moment — insert mode is the program's, and the status
+  line says `-- TERMINAL --` while that is true — and `<C-\>` is the way back to
+  the editor's own keys, because `<Esc>` is not available for the job. `:kill`
+  stops it, a resize tells it the new size, and when it exits what it drew stays
+  in the buffer as scrollback with `[process exited N]` at the end. Neither
+  frontend changed a line: a terminal is a grid of cells, and so is everything
+  else. Colours, cursor movement, erasing, scrolling, the alternate screen and
+  wide characters all work; a scroll region does not, so a program that sets one
+  scrolls the whole screen.
 - Lua can reach outside the editor now, without the editor waiting: `ed.shell(cmd,
   callback)` runs a command and calls back with what it said and what it exited
   with, `ed.read_file` and `ed.write_file` touch the filesystem, and a callback

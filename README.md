@@ -673,7 +673,8 @@ say `E553` rather than wrapping.
 
 What the last question named is kept as a list: `:clist` says it in one line,
 `:copen {pattern}` shows it in a window of its own — narrowed to the lines the
-pattern matches, which is what makes a list of two hundred places usable — `<CR>` on a line goes to the place that
+pattern matches, which is a search's pattern and a search's case rule, and what
+makes a list of two hundred places usable — `<CR>` on a line goes to the place that
 line names and closes the window, `:cclose` just closes it — taking the list's own
 document with it, so a session that opens a hundred lists is not carrying a hundred
 scratch documents in `:ls` — and the list is not for editing — and `:cnext` and `:cprev` walk it — opening another file when a place is in one — and a count walks

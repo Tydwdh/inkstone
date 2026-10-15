@@ -3227,8 +3227,8 @@ character for character, while `/` and `:s` put it through `dialect` first.
   the command looked for the characters `(a)` and said "Pattern not found". The
   roadmap said "an engine error" for one commit and was wrong.
 - **Files:** `inkstone-core` (`Global`, `run_global`, the case rule).
-- **Left for later:** nothing; the dialect is now the same everywhere a pattern is
-  typed.
+- **Left for later:** the list filters, which were still compiling what they were
+  given — the entry below this one.
 
 ## Done — vim's character classes
 
@@ -3405,6 +3405,27 @@ last thing the `:vimgrep` entry left for later.
 - **Files:** `fuzzy.rs` (new: the matcher), `vimgrep.rs` (the flag, and the
   literal pattern that is not translated), `editor/ex.rs` (the walk, which is one
   place a line for fuzzy and `find_places` for a pattern).
+
+## Done — the list filters take the dialect too
+
+The `:g` entry above said "nothing; the dialect is now the same everywhere a
+pattern is typed", and that was wrong when it was written: `:copen {pattern}`
+and `:lopen {pattern}` were still compiling what they were given, and had been
+since they were built — while the function that opens them says in as many words
+that "the pattern is the same dialect a search uses, and so is the case rule".
+
+- **What shipped:** both filters go through the translation and the case rule a
+  search uses, so `:copen \(two\)` is a group rather than the five characters
+  `(two)`, `\zs` means what it means to a search, and a `\c` or `\C` in the
+  pattern settles case over `'ignorecase'` and `'smartcase'`.
+- **What the failing test was:** `:copen \(two\)` said "Pattern not found:
+  \(two\)" — the engine read the group as a literal parenthesis and the pattern
+  matched nothing. It is `1 place` now.
+- **What fixing it improved besides the bug:** the two paths held the same ten
+  lines twice — compile, say `E54`, remember nothing — and they are one
+  `filter_pattern` now.
+- **Files:** `editor/lists.rs` (`filter_pattern`, and the places and diagnostics
+  call sites).
 
 ## Next, roughly in order
 

@@ -268,6 +268,19 @@ fn a_list_can_be_narrowed_to_what_matches() {
     // A pattern that is not a pattern says so too.
     ed.execute_cmdline("copen [");
     assert!(ed.message.starts_with("E54"), "{}", ed.message);
+    // The filter takes a *search's* pattern and a search's case rule: a group is
+    // a group rather than the characters `(two)`, and `\C` is the pattern's own
+    // word about case. (This is what the documentation of this said for a while
+    // before the code did it.)
+    ed.execute_cmdline("copen \\(two\\)");
+    assert_eq!(ed.message, "1 place", "a group is not a literal `(two)`");
+    let window = ed.current_window;
+    ed.close_window(window);
+    ed.execute_cmdline("copen \\Ctwo");
+    assert_eq!(ed.message, "1 place", "`\\C` is the pattern's own case");
+    let window = ed.current_window;
+    ed.close_window(window);
+
     // With no pattern the whole list is shown.
     ed.execute_cmdline("copen");
     assert_eq!(ed.list_targets.len(), 3);

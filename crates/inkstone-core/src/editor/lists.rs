@@ -338,6 +338,36 @@ impl Editor {
         self.message = format!("{count} settings");
     }
 
+    /// The pattern a list filter keeps lines by, or `None` with the reason on the
+    /// message row.
+    ///
+    /// The dialect and the case rule are a *search's*: `\(a\)` is a group, `\zs`
+    /// means what it means to a search, and a `\c` or `\C` in the pattern settles
+    /// case over `'ignorecase'` and `'smartcase'` — which is what `/`, `:g` and
+    /// `:s` do, and what this documentation promised before the code did it.
+    fn filter_pattern(&mut self, pattern: &str) -> Option<regex::Regex> {
+        let translated = match crate::dialect::translate(pattern) {
+            Ok(translated) => translated,
+            Err(error) => {
+                self.message = format!("E54: {error}");
+                return None;
+            }
+        };
+        let ignore_case = translated
+            .ignore_case
+            .unwrap_or_else(|| self.search_ignore_case(pattern));
+        match regex::RegexBuilder::new(&translated.pattern)
+            .case_insensitive(ignore_case)
+            .build()
+        {
+            Ok(compiled) => Some(compiled),
+            Err(error) => {
+                self.message = format!("E54: {error}");
+                None
+            }
+        }
+    }
+
     /// Which lines a filter keeps, or everything when there is none.
     ///
     /// The pattern is the same dialect a search uses, and so is the case rule; a
@@ -352,17 +382,7 @@ impl Editor {
         // so: the alternative is a window with no lines in it, which looks like a
         // bug rather than an answer.
         let matched = std::rc::Rc::new(std::cell::Cell::new(false));
-        let ignore_case = self.options.borrow().ignorecase;
-        let compiled = match regex::RegexBuilder::new(pattern)
-            .case_insensitive(ignore_case)
-            .build()
-        {
-            Ok(compiled) => compiled,
-            Err(error) => {
-                self.message = format!("E54: {error}");
-                return None;
-            }
-        };
+        let compiled = self.filter_pattern(pattern)?;
         let seen = matched.clone();
         Some(Box::new(move |_, line| {
             let found = compiled.is_match(line);
@@ -467,17 +487,10 @@ impl Editor {
             return;
         }
         if let Some(pattern) = filter.map(str::trim).filter(|p| !p.is_empty()) {
-            let ignore_case = self.options.borrow().ignorecase;
-            match regex::RegexBuilder::new(pattern)
-                .case_insensitive(ignore_case)
-                .build()
-            {
-                Ok(compiled) => rows.retain(|row| compiled.is_match(&row.3)),
-                Err(error) => {
-                    self.message = format!("E54: {error}");
-                    return;
-                }
-            }
+            let Some(compiled) = self.filter_pattern(pattern) else {
+                return;
+            };
+            rows.retain(|row| compiled.is_match(&row.3));
             if rows.is_empty() {
                 self.message = format!("Pattern not found: {pattern}");
                 return;

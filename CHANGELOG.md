@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- `:copen {pattern}` and `:lopen {pattern}` take a *search's* pattern: a group is
+  a group rather than the characters `(a)`, `\zs` means what it means to a
+  search, and a `\c` or `\C` in the pattern settles case over `'ignorecase'` and
+  `'smartcase'`. They were compiling exactly what they were given — which the
+  function that opens them has always said they do not.
 - A horizontal scroll counts cells and not characters. A tab is a run of cells
   and a wide grapheme takes two, so a cursor a few characters into a tabbed line
   is well past the right edge of a narrow window: the view scrolled too little

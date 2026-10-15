@@ -82,6 +82,30 @@ cargo run -p inkstone-gui -- sample.txt # the same screen, in a window
 It needs a real terminal (Windows Terminal or conhost): raw mode fails under a
 redirected pipe. `inkstone --server <PATH>` points at a daemon somewhere else.
 
+### Installing it, so it runs from anywhere
+
+`install.ps1` builds the two binaries in release mode and copies them into
+cargo's bin directory, which is on the `PATH` of anybody who installed Rust with
+rustup — so `inkstone some-file.txt` works from any directory after that. The
+frontend looks for the daemon *beside itself*, so both go in together.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1            # the editor
+powershell -ExecutionPolicy Bypass -File install.ps1 -WithGui  # and the window
+```
+
+Run it again after pulling: nothing changed rebuilds in a tenth of a second, and
+one changed file in the kernel seven or eight — the same `target` directory a
+`cargo build` uses, so only what changed is compiled. (The first run of all is
+around twenty seconds; the windowed frontend brings wgpu, whose first build is
+minutes.) `-AddToPath` adds the directory to your user `PATH` if it is not on it
+already, and `-Prefix <dir>` installs somewhere else.
+
+The manual equivalent is what the script does: `cargo build --release --locked -p
+inkstone -p inkstone-server` and then copy `target/release/inkstone.exe` and
+`inkstone-server.exe` into the same directory on the `PATH`. On Linux and macOS
+the same two files are `inkstone` and `inkstone-server`.
+
 ## Keys
 
 `MODE` is `n` (normal), `v` (visual) or `i` (insert). `KEYS` uses vim-ish angle

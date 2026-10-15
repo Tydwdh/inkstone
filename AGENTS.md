@@ -37,11 +37,16 @@ believe a broken tree is fine.
 built, because the frontend looks for the daemon next to its own executable —
 `cargo build --workspace` first.
 
+To *use* the editor rather than work on it, `install.ps1` builds the two
+binaries in release mode and puts them in cargo's bin directory, so it runs from
+anywhere — and running it again rebuilds only what changed (a tenth of a second
+when nothing did).
+
 ## What is not tested, and how to check it
 
-The workspace is covered by 573 tests, including one that drives the real
+The workspace is covered by 603 tests, including one that drives the real
 daemon binary over pipes and inspects the bytes it writes. The kernel, the
-protocol and the daemon are 502 of them; the rest belong to the frontends, the
+protocol and the daemon are 532 of them; the rest belong to the frontends, the
 client and the LSP crate.
 **A frontend's drawing is not covered by CI and cannot be**: raw mode needs a
 real terminal, and a window needs a real window. Both the window's metrics and

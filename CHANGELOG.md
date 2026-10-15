@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- Commands can be run: `:!cmd` runs one and puts what it said in a window of its
+  own, `:r !cmd` reads its output into the buffer below the line the command was
+  given from, and `:{range}!cmd` — `:%!sort`, `:2,5!jq .` — filters those lines
+  through it, as one edit, so one `u` puts the text back. `:kill` stops a command
+  that will not come back, and a second command while one is running says so
+  rather than queueing behind it. The command runs on threads of its own, so the
+  editor keeps working while a build does; the shell is `cmd /C` on Windows and
+  `sh -c` elsewhere, and neither frontend needed a line of its own for any of it.
+  Both of a command's streams go into its output document, because a build's
+  errors are on the second one.
 - A directory opens as a **listing** — `inkstone .`, `:e src`, or `gf` on a name
   that turns out to be one. It shows what is in the directory, one entry to a
   line, directories first and marked with a `/`, and the path it was opened with

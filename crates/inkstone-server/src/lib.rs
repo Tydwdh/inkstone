@@ -12,13 +12,17 @@ use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 
-use crossbeam_channel::{unbounded, Sender};
+use crossbeam_channel::{unbounded, Sender, TryRecvError};
 
 use anyhow::{Context, Result};
 use inkstone_core::{Ask, CompletionItem, Diagnostic, Editor, Severity};
 use inkstone_lsp::{position, uri_from_path, Client as LspClient};
 use inkstone_rpc::{read_client_msg, write_server_msg, ClientMsg, Grid, ServerMsg};
 use serde_json::Value;
+
+mod job;
+
+use job::Job;
 
 /// How the daemon should find its Lua configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +66,10 @@ pub struct Session {
     /// The file a language server was last started for, so that a file no server
     /// was found for is not looked for again and again.
     lsp_tried_for: Option<PathBuf>,
+    /// The command that is running, if one is: a process, its pipes and the
+    /// thread that waits for it. See `job.rs` for why none of it is in the
+    /// kernel.
+    running: Option<Job>,
 }
 
 /// A language server, and what the session has to remember about talking to it.
@@ -584,6 +592,7 @@ impl Session {
             screen: None,
             lsp: None,
             lsp_tried_for: None,
+            running: None,
         }
     }
 
@@ -1097,6 +1106,7 @@ impl Session {
             self.editor.current_document(),
         );
         self.tick_lsp();
+        self.tick_job();
         self.ask_resolve();
         let after = (
             self.editor.message.clone(),
@@ -1106,6 +1116,54 @@ impl Session {
         );
         if before != after {
             self.editor.redraw = true;
+        }
+    }
+
+    /// The command the editor asked for, and the answer it is waiting for.
+    ///
+    /// A command runs on its own threads and is *started* here, at a tick: that
+    /// is what keeps a ten-second build from being ten seconds of a frozen
+    /// editor, and it is the same shape the language server has.
+    fn tick_job(&mut self) {
+        if self.running.is_none() {
+            if let Some(request) = self.editor.job_request() {
+                match job::spawn(&request.command, request.input.as_deref()) {
+                    Ok(running) => self.running = Some(running),
+                    Err(error) => self.editor.job_failed(error.to_string()),
+                }
+            }
+        }
+        if self.editor.take_job_kill() {
+            if let Some(running) = &self.running {
+                running.kill();
+            }
+        }
+        let Some(running) = &self.running else {
+            return;
+        };
+        match running.outcome() {
+            Ok(outcome) => {
+                self.running = None;
+                self.editor
+                    .job_finished(outcome.output, outcome.stderr, outcome.status);
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                // The thread that was going to answer is gone, which is the one
+                // way a command can end without a result: say so rather than
+                // leave the editor waiting for it forever.
+                self.running = None;
+                self.editor
+                    .job_failed("it stopped without a word".to_string());
+            }
+        }
+    }
+
+    /// Stop the command that is running, if one is: the session is going away,
+    /// and a process left behind would outlive the editor that asked for it.
+    pub fn stop_job(&mut self) {
+        if let Some(running) = &self.running {
+            running.kill();
         }
     }
 
@@ -1293,6 +1351,7 @@ pub fn run_stdio(
         }
     }
     session.stop_lsp();
+    session.stop_job();
     output.flush().context("failed to flush the output")?;
     Ok(())
 }

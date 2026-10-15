@@ -238,6 +238,7 @@ impl CommandRegistry {
         close_diagnostics,
         open_place,
         up_directory,
+        kill_command,
         complete_next,
         complete_previous,
         complete_accept,
@@ -1758,6 +1759,17 @@ fn open_place(editor: &mut Editor, _params: &[Param]) -> Result<()> {
 /// line below it.
 fn up_directory(editor: &mut Editor, _params: &[Param]) -> Result<()> {
     editor.up_directory();
+    Ok(())
+}
+
+/// `:kill` — stop the command that is running.
+///
+/// Not a vim command: vim's `:!` waits, so a person interrupts it with `<C-c>`
+/// at the terminal. Nothing here waits — the point of running a command on a
+/// thread of its own is that the editor goes on working while it runs — so
+/// stopping one has to be said out loud.
+fn kill_command(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    editor.kill_job();
     Ok(())
 }
 

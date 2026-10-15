@@ -35,6 +35,7 @@ fn command_name(cmd: &str) -> Option<&'static str> {
         "lopen" => "open_diagnostics",
         "lclose" => "close_diagnostics",
         "clearjumps" => "clear_jumps",
+        "kill" => "kill_command",
         "p" | "print" => "print_line",
         "w" => "save",
         "w!" => "save_force",
@@ -477,9 +478,15 @@ impl Editor {
         // range they have no use for — `:1,5w` writes the file, not five lines.
         let range = self.resolve_range(line);
         let line = crate::substitute::strip_range(line).unwrap_or(line);
-        let (mut cmd, mut arg) = match line.split_once(char::is_whitespace) {
-            Some((cmd, arg)) => (cmd, arg.trim()),
-            None => (line, ""),
+        // `:!{cmd}` is the one command whose argument is the whole line — spaces
+        // and all — which is why it cannot be read by the split below: `:!cargo
+        // init` is a command line, not a command called `!cargo`.
+        let (mut cmd, mut arg) = match line.strip_prefix('!') {
+            Some(command) => ("!", command.trim()),
+            None => match line.split_once(char::is_whitespace) {
+                Some((cmd, arg)) => (cmd, arg.trim()),
+                None => (line, ""),
+            },
         };
         // `:tab split` and `:tab new` are two words for the same things as
         // `:tabsplit` and `:tabnew`.
@@ -526,6 +533,7 @@ impl Editor {
         if self.ex_write_append(cmd, arg, range)
             || self.ex_write_range(cmd, arg, range)
             || self.ex_read(cmd, arg, range)
+            || self.ex_shell(cmd, arg, range)
             || self.ex_normal(cmd, line, range)
             || self.ex_format_range(cmd, range)
             || self.ex_sort(cmd, arg, range)
@@ -845,14 +853,21 @@ impl Editor {
             return false;
         }
 
-        let Some(path) = arg.split_whitespace().next().map(PathBuf::from) else {
-            self.message = "E471: Argument required".to_string();
-            return true;
-        };
         if let Some((_, to)) = range {
             let last = self.buffer.line_count().saturating_sub(1);
             self.cursor.row = to.min(last);
         }
+        // `:r !cmd`: what a program says rather than what a file holds, and the
+        // `!` in front of the argument is what tells the one from the other. The
+        // command is the whole argument — a command line has spaces in it.
+        if let Some(command) = arg.trim().strip_prefix('!') {
+            self.read_command(command);
+            return true;
+        }
+        let Some(path) = arg.split_whitespace().next().map(PathBuf::from) else {
+            self.message = "E471: Argument required".to_string();
+            return true;
+        };
         match self.read_file_below(&path) {
             Ok(count) => {
                 self.message = format!(
@@ -863,6 +878,20 @@ impl Editor {
             }
             Err(error) => self.message = error.to_string(),
         }
+        true
+    }
+
+    // `:!{cmd}`, and `:{range}!{cmd}`: a program to run.
+    //
+    // With a range the lines are the program's input and its output replaces
+    // them — a filter — and without one it is a command on its own whose output
+    // becomes a document. Both are one thing to the editor: something to run,
+    // and what to do with what it says.
+    fn ex_shell(&mut self, cmd: &str, arg: &str, range: Option<(usize, usize)>) -> bool {
+        if cmd != "!" {
+            return false;
+        }
+        self.run_shell(arg, range);
         true
     }
 

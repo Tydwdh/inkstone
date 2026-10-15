@@ -10,6 +10,7 @@ fn feed(editor: &mut Editor, notation: &str) {
 mod folds;
 mod indent;
 mod insert;
+mod jobs;
 mod keys;
 mod listing;
 mod lsp;

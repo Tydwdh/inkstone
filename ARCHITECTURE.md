@@ -54,11 +54,18 @@ the child's stdin/stdout. There is exactly one writer to each direction.
 | `inkstone-gui` | `inkstone-gui-bridge` | waking the event loop for the frames that arrive |
 | `inkstone-server` | main | the `Editor`, the output stream, the Lua VM |
 | `inkstone-server` | `inkstone-server-rpc-reader` | blocking read of client frames |
+| `inkstone-server` | `inkstone-job-*` | one running command: its shell, its three pipes and the thread that waits for them |
 
 The editor never crosses a thread boundary, so it needs no locks. The only
-shared state is messages in a `crossbeam-channel`. Starting the daemon, framing
+shared state is messages in a `crossbeam-channel` — and the one `AtomicBool` that
+says a command has been asked to stop. Starting the daemon, framing
 at it and reading its frames is [`inkstone_client`](crates/inkstone-client), so a
 frontend only supplies a window or a terminal and a set of keys.
+
+A command (`:!`, `:r !`, `:{range}!`) is the one thing the editor asks for and
+waits on, and it does not wait in the editor: the kernel leaves the request, a
+tick in the session starts it, and the outcome comes back the same way a
+language server's answer does. [`docs/jobs.md`](docs/jobs.md) is the note.
 
 ## The wire
 

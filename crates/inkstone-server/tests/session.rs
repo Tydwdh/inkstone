@@ -746,6 +746,170 @@ fn end_to_end_with_a_language_server() {
     let _ = reader.join();
 }
 
+/// The rows of the screen, top to bottom.
+fn rows(screen: &Screen) -> Vec<String> {
+    let grid = screen.grid();
+    (0..grid.height).map(|row| grid.row_text(row)).collect()
+}
+
+/// The daemon's own turns, until `done` says so or the timeout runs out.
+///
+/// A command runs on threads of its own and its answer arrives at a tick, so a
+/// test that wants the answer has to tick the way the daemon's loop does.
+fn pump(session: &mut Session, screen: &mut Screen, done: impl Fn(&Screen) -> bool) -> bool {
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    loop {
+        if done(screen) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        session.tick();
+        if let Some(frame) = session.frame_if_dirty() {
+            fold_frame(&frame, screen);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_command_runs_and_what_it_says_becomes_a_document() {
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 60, rows: 12 }],
+    );
+
+    let mut keys = type_str(":!echo hello");
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen).iter().any(|row| row.starts_with("hello"))
+        }),
+        "the output is on screen: {:?}",
+        rows(&screen)
+    );
+    // In a window of its own, named after the command that produced it.
+    assert!(
+        rows(&screen).iter().any(|row| row.contains("!echo hello")),
+        "and the window says where it came from: {:?}",
+        rows(&screen)
+    );
+}
+
+#[test]
+fn a_filter_runs_the_text_through_a_command() {
+    let dir = temp_dir("filter");
+    let path = dir.join("filtered.txt");
+    std::fs::write(&path, "pear\napple\n").unwrap();
+
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 60, rows: 8 }],
+    );
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Command {
+            name: "edit_file".to_string(),
+            params: vec![Param::Str(path.to_string_lossy().to_string())],
+        }],
+    );
+
+    // `:%!sort` — `sort` is a command both platforms' shells have, and sorting
+    // two lines is the same answer whichever one runs it.
+    let mut keys = type_str(":%!sort");
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen)
+                .last()
+                .is_some_and(|row| row.trim_end().ends_with("lines filtered"))
+        }),
+        "the filter was applied: {:?}",
+        rows(&screen)
+    );
+    assert!(
+        rows(&screen)[0].trim_end() == "apple",
+        "the text is the sorted one: {:?}",
+        rows(&screen)
+    );
+    // What the buffer holds is what a write puts on disk, which is the whole
+    // point of a filter.
+    let mut keys = type_str(":wq");
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "apple\npear\n",
+        "the file on disk is the filtered text"
+    );
+}
+
+#[test]
+fn a_command_that_will_not_finish_can_be_killed() {
+    // A command that takes longer than the test: `ping` on Windows, `sleep`
+    // everywhere else, both of which do nothing but take time.
+    #[cfg(windows)]
+    let slow = "ping -n 30 127.0.0.1";
+    #[cfg(not(windows))]
+    let slow = "sleep 30";
+
+    let mut session = session();
+    let mut screen = Screen::new();
+    feed(
+        &mut session,
+        &mut screen,
+        vec![ClientMsg::Resize { cols: 60, rows: 10 }],
+    );
+    let mut keys = type_str(&format!(":!{slow}"));
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen).last().is_some_and(|row| row.starts_with('!'))
+        }),
+        "the command was taken: {:?}",
+        rows(&screen)
+    );
+
+    let mut keys = type_str(":kill");
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen)
+                .last()
+                .is_some_and(|row| row.starts_with("shell "))
+        }),
+        "the answer is that it was stopped: {:?}",
+        rows(&screen)
+    );
+    // And the editor is free: the command after it is not refused.
+    let mut keys = type_str(":!echo after");
+    keys.push(pressed(KeyCode::Enter));
+    feed(&mut session, &mut screen, keys);
+    assert!(
+        pump(&mut session, &mut screen, |screen| {
+            rows(screen).iter().any(|row| row.starts_with("after"))
+        }),
+        "another command runs: {:?}",
+        rows(&screen)
+    );
+}
+
 /// The real thing: spawn `inkstone-server`, talk to it over its pipes, then check
 /// that the file it wrote is on disk.
 #[test]

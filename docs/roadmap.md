@@ -3475,6 +3475,54 @@ command that works on text works on a file manager.
   process buffers (`:!`, `:term`) this seam was built for, which need a design
   note of their own before they touch the wire.
 
+## Done — running a command
+
+`!` is where an editor stops being only an editor: `:{range}!cmd` filters text
+through a program, `:r !cmd` reads one's output into the buffer, and `:!cmd` runs
+one on its own. vim has all three and waits for each — its whole design is one
+thread that stops when told to. This one cannot, so the kernel asks, the session
+runs, and the answer arrives at a tick. `docs/jobs.md` is the design note.
+
+- **What shipped:** `:!cmd`, `:r !cmd`, `:%!cmd` (and any range) and `:kill`, in
+  both frontends without either one knowing. `:!` puts standard output and
+  standard error into a document of its own in a window below — named `!cmd`,
+  which is what the new buffer `title` is for — and leaves the cursor where it
+  was. A filter's output replaces its range as **one edit**, so one `u` puts the
+  text back. `:r !` inserts whole lines below the line the command was given
+  from, ending the way that line ends.
+- **Constraints it had to respect, and how:** three of them, and each one is a
+  way to hang. Every pipe gets a thread of its own, because reading stdout to the
+  end and *then* stderr deadlocks on any compiler that fills the second pipe
+  while the first is open; the same for stdin, which a filter reads while it
+  writes. `:kill` sets a flag the *waiting* thread reads, because a child behind
+  a mutex its waiter holds is a child nothing can kill. And the pipes are given
+  two seconds after the process goes, because on Windows a killed shell leaves
+  its own child holding them.
+- **What the smoke caught:** `:%!sort` on Windows wrote the file back as
+  `apple\r\npear\r\n` — cmd's `sort` ends every line with CRLF — so filtering a
+  file was silently converting it. A program does not get to change the file's
+  line endings: what a filter replaces is the *text*, and the terminator belongs
+  to the line model, so the program's endings are rewritten to match the range's.
+  The smoke also decided that a command which says nothing opens no window, after
+  a killed `ping` left an empty one behind.
+- **What running it off the thread costs:** an answer can arrive after the text
+  it was about moved on. A filter's range and a `:r !` line are held as the text
+  they were, and text that is no longer that text is refused — `E: the text
+  changed while "cmd" ran` — rather than replaced. Vim never has to ask, because
+  it waits.
+- **Files:** `editor/jobs.rs` (new: the request, the three actions, the edits,
+  the endings), `inkstone-server/src/job.rs` (new: the shell, the three pumps,
+  the waiter, the kill), `editor/ex.rs` (`:!` parses as the one command whose
+  argument is the whole line, and `:r !`), `command.rs` and `editor/ex.rs`
+  (`:kill`), `buffer.rs` (a title for a document with no path), the session's
+  tick, and the tests in `editor/tests/jobs.rs` and `tests/session.rs` — the
+  latter running real commands, since the process is the point.
+- **Left for later:** a terminal (`:term`), which would need the wire itself —
+  the child would have to draw where a person can see it — and a design note
+  before it
+  does; interactive input; `:w !cmd`; and reading a build's errors into the list
+  of places, which is the one that would turn `:!cargo build` into a workflow.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

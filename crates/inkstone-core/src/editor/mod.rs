@@ -50,6 +50,7 @@ mod edits;
 mod ex;
 mod folds;
 mod insert;
+mod jobs;
 mod keys;
 mod lists;
 mod lsp;
@@ -1234,6 +1235,13 @@ pub struct Editor {
     /// carries on with what it can answer itself, and a session that has a
     /// server takes the question and asks it.
     pub(crate) lsp_ask: Option<Ask>,
+    /// The command that is running, if one is, and what its output is for.
+    ///
+    /// The kernel does not run anything — see `jobs.rs` — so this is a command
+    /// that has been asked for, and the answer that will come back to it.
+    pub(crate) job: Option<jobs::Job>,
+    /// Set by `:kill`, taken by the session that owns the process.
+    pub(crate) job_kill: bool,
     /// The last command that changed something, with the arguments it was run
     /// with: `.` runs it again.
     pub(crate) last_command: Option<(String, Vec<Param>)>,
@@ -1368,6 +1376,8 @@ impl Editor {
             resizing: None,
             completion: None,
             lsp_ask: None,
+            job: None,
+            job_kill: false,
             last_command: None,
             last_insert: None,
             insert_log: None,

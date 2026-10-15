@@ -67,6 +67,8 @@ pub struct Buffer {
     /// compare with — a scratch buffer, or a path that did not exist.
     stamp: Option<(u64, std::time::SystemTime)>,
     kind: BufferKind,
+    /// What to call a document that has no path to be called by.
+    title: Option<String>,
 }
 
 /// What the text of a buffer *is*.
@@ -103,6 +105,7 @@ impl Buffer {
             path: None,
             stamp: None,
             kind: BufferKind::File,
+            title: None,
         }
     }
 
@@ -130,6 +133,7 @@ impl Buffer {
                 path: Some(path.to_path_buf()),
                 stamp: None,
                 kind: BufferKind::File,
+                title: None,
             });
         }
         let bytes = std::fs::read(path)?;
@@ -140,6 +144,7 @@ impl Buffer {
             path: Some(path.to_path_buf()),
             stamp: Self::stamp_of(path),
             kind: BufferKind::File,
+            title: None,
         };
         buf.normalize();
         Ok(buf)
@@ -157,6 +162,7 @@ impl Buffer {
             path: Some(path.to_path_buf()),
             stamp: Self::stamp_of(path),
             kind: BufferKind::Listing { entries },
+            title: None,
         };
         buf.normalize();
         Ok(buf)
@@ -169,6 +175,7 @@ impl Buffer {
             path: None,
             stamp: None,
             kind: BufferKind::File,
+            title: None,
         };
         buf.normalize();
         buf
@@ -326,6 +333,16 @@ impl Buffer {
         self.path.as_deref()
     }
 
+    /// Name a scratch buffer that is *about* something — a command's output.
+    ///
+    /// A document with no path has nothing to be called, and `[No Name]` in a
+    /// status line says where a window came from not at all. This is the one
+    /// thing such a document can say about itself, and it is said by whoever
+    /// made it, because only they know.
+    pub(crate) fn set_title(&mut self, title: &str) {
+        self.title = Some(title.to_string());
+    }
+
     /// Whether this buffer lists a directory rather than holding a file.
     ///
     /// The one question a command has to ask before treating the text as a file
@@ -353,6 +370,7 @@ impl Buffer {
             .as_deref()
             .and_then(Path::file_name)
             .map(|n| n.to_string_lossy().into_owned())
+            .or_else(|| self.title.clone())
             .unwrap_or_else(|| "[No Name]".to_string())
     }
 

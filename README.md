@@ -57,9 +57,10 @@ the pointer (or, on a bracket, everything up to its pair), triple takes the line
 quadruple takes a rectangular block — and a drag after a double click takes whole
 words, until the button comes up.
 
-Not implemented: `\zs` and `\ze` in a pattern — refused rather than
-mistranslated. [`docs/roadmap.md`](docs/roadmap.md) lists the rest, with what each
-thing would have to respect.
+Not implemented: vim's character classes for identifiers and file names (`\i`,
+`\k`), which are left to the engine to refuse rather than translated.
+[`docs/roadmap.md`](docs/roadmap.md) lists the rest, with what each thing would
+have to respect.
 
 ## Build and run
 
@@ -682,10 +683,16 @@ thing each is and the line it is on — and goes to the first of them.
 some of them away — `:delmarks!` takes them all. `:clearjumps` empties the jump
 list the same way.
 
-`\zs` and `\ze` are not here, and a pattern using them is refused rather than
-translated: they move where a match starts and ends, and the engine has no way to
-say that — its `\z` is an anchor at the end of the text, which would quietly
-match something else.
+`\zs` and `\ze` say where inside itself a match begins and ends: `s/foo\zsbar/X/`
+replaces the `bar` and leaves the `foo`, and a `\ze` on its own is a match that
+ends where it says while the text after it is still needed to match —
+`end\ze\(if\|for\)` is a match that is "end" in "endif". Vim's rules for the
+awkward cases are the ones here: a pattern may say either of them several times
+and it is the last one encountered in a matching branch that counts, a `\ze`
+before the `\zs` is no end at all, and `&` in a replacement is the match the
+pattern reports. A `\zs` inside a collection, or one followed by a multi, is
+refused rather than guessed at: vim reads the first as characters and refuses the
+second itself.
 
 `diagnostics` lists what a language server has said about this file, and `]d` and
 `[d` walk its diagnostics, wrapping around and saying what each one is. The range

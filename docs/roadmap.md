@@ -3164,14 +3164,64 @@ The last of `gf`'s lookups: the name is not under the cursor but *selected*.
   `goto_file_at`, the visual-mode binding and its README row).
 - **Left for later:** `'includeexpr'`, `~user`, and `%`/`#` in a name.
 
+## Done — `\zs` and `\ze`
+
+The last thing the README called not implemented: a pattern that says where
+inside itself its match begins and ends, "the next char is the first char of the
+whole match".
+
+- **What shipped:** the two markers, for `/`, `?`, `n`, `N`, the preview while a
+  pattern is typed, every match highlighted, and `:s` with or without a range and
+  with the `c` flag. `:s/foo\zsbar/X/` replaces the `bar` and leaves the `foo`;
+  `end\ze\(if\|for\)` is a match that is "end", with the `if` still needed to be
+  there.
+- **Constraints it had to respect, and how:** the engine has no way to say "the
+  match starts here and ends there" — a match there is a stretch of text, and
+  nothing in a pattern can cut one in half — so each marker becomes an *empty
+  group* where it matched, and the part of a match the pattern reports is read
+  back from where those groups landed (`dialect::Extent`). They are groups in the
+  engine's numbering too, so a replacement's `\1` is read through the extent: a
+  marker in the middle of a pattern otherwise moves every number after it.
+- **What the rules turned out to be, and how they were found:** the entry was
+  written against `vim -es` (Vim 9.2) rather than against the manual alone, and
+  three rules came out of it that the manual only implies. The last marker
+  *encountered* is the one that counts, which is not the last one written: with
+  `\(a\zsb\|c\zsd\)\{3}` over `abcdab` it is the marker in the branch that
+  matched last. A marker in a group that repeats is read from the last iteration,
+  which is the manual's own example (`\(.\{-}\zsFab\)\{3}` finds the third
+  "Fab"). And a `\ze` that lands *before* the `\zs` is no end at all: `a\zeb\zsc`
+  over `abc` replaces the `c`.
+- **What could not be translated, and is refused instead:** a marker inside a
+  collection, where vim reads it as characters and this translator does not model
+  a collection's own escapes; and a marker followed by a multi, which vim refuses
+  itself ("This cannot be followed by a multi. *E888*").
+- **What the tests caught:** that `:s`'s "pattern not found" message had been
+  showing the *translated* pattern — `a()b` — where a search has always shown
+  what was typed. The substitute now keeps both, the way `Search` does.
+- **Files:** `dialect.rs` (the markers and `Extent`), `search.rs` (the reported
+  span), `substitute.rs` (the pattern as typed, the group mapping, and the
+  splice that replaces the reported part), `editor/ex.rs` and
+  `editor/confirm.rs`.
+- **Left for later:** `:g` and `:v`, which are the entry below.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six
 modules with new logic in each, that is a sign it should be split.
 
-### 1. Bigger seams, not yet designed
+### 1. `:g` and `:v`, the one place the dialect is not used
 
-the quickfix-shaped list window, `\zs`, and the rest of the dialect.
+Their pattern is compiled exactly as it is typed, so `:g/\(a\)/d` looks for the
+characters `(a)` and `:g/a\zsb/d` finds nothing (both checked in a terminal),
+while `/` and `:s` take vim's dialect.
+Everything they need from a match is whether there is one, so no extent is
+involved and the change is the translation itself, plus the message that shows
+the pattern when nothing matched.
+
+### 2. Bigger seams, not yet designed
+
+the quickfix-shaped list window, and the rest of the dialect (`\i`, `\k`, `\f`,
+`\@<=` and the lookarounds, `\%V`, `\%>l`).
 Each one should get its own design note first if it wants to change
 `inkstone-rpc`; the further features are from the protocol, the cheaper they
 are, which is the point of the split. [`rendering.md`](rendering.md) covers

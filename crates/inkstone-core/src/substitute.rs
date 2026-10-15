@@ -14,13 +14,16 @@
 //!
 //! # Two dialects, one conversation
 //!
-//! The *pattern* is a Rust regular expression, the same dialect `/` searches
-//! with. The *replacement* is written the way vim writes one — `&` for the whole
-//! match, `\1` for a group — and is translated here into the engine's `$` forms,
-//! so a person who has typed `:%s/foo/&bar/` before can type it again. A `$` a
-//! user writes is a literal `$`, unless it is followed by a digit or a brace,
-//! which is the one case where the engine's own spelling is more useful than
-//! vim's.
+//! The *pattern* is typed in vim's dialect, the same one `/` searches with, and
+//! is translated into the engine's by `dialect` — which is also what
+//! says where a match begins and ends when `\zs` and `\ze` are in it, since what
+//! a substitute replaces is the part of a match the pattern *reports* rather
+//! than the text the engine matched. The *replacement* is written the way vim
+//! writes one — `&` for the whole match, `\1` for a group — and is translated
+//! here into the engine's `$` forms, so a person who has typed
+//! `:%s/foo/&bar/` before can type it again. A `$` a user writes is a literal
+//! `$`, unless it is followed by a digit or a brace, which is the one case where
+//! the engine's own spelling is more useful than vim's.
 
 /// One end of a line range: vim's addresses, as far as `:s` uses them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,10 +42,17 @@ pub(crate) enum Address {
 /// A `:s` line, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Substitute {
-    /// The pattern to find, in the regex dialect.
+    /// The pattern as it was typed, which is what a message shows — a search
+    /// keeps its own the same way.
     pub(crate) pattern: String,
+    /// The same pattern in the engine's dialect, which is what is compiled.
+    pub(crate) translated: String,
     /// What to put in its place, translated for the engine.
     pub(crate) replacement: String,
+    /// Where `\zs` and `\ze` put the ends of a match, if the pattern has any:
+    /// what a substitute replaces is the part the pattern reports, not the
+    /// text the engine matched.
+    pub(crate) extent: crate::dialect::Extent,
     /// Whether every match on a line is replaced, or only the first.
     pub all: bool,
     /// The first line to look at, if one was named.
@@ -148,8 +158,10 @@ impl Substitute {
             ignore_case = forced;
         }
         Ok(Self {
-            pattern: translated.pattern,
-            replacement: translate(&replacement),
+            pattern: pattern.clone(),
+            translated: translated.pattern,
+            replacement: translate(&replacement, &translated.extent),
+            extent: translated.extent,
             all,
             from,
             to,
@@ -280,7 +292,12 @@ fn split(text: &str, delimiter: char) -> Vec<String> {
 }
 
 /// A replacement written the vim way, in the engine's spelling.
-fn translate(replacement: &str) -> String {
+///
+/// `\1` is the pattern's first group, in the pattern's own numbering — which
+/// `\zs` and `\ze` move along in the engine's, since each of them is a group
+/// too, so the number is looked up in `extent`. `&` and `\0` are the whole
+/// match, which for a pattern with markers is the part it reports.
+fn translate(replacement: &str, extent: &crate::dialect::Extent) -> String {
     let mut out = String::with_capacity(replacement.len());
     let mut chars = replacement.chars().peekable();
     while let Some(c) = chars.next() {
@@ -289,8 +306,9 @@ fn translate(replacement: &str) -> String {
             // backslash is itself.
             '\\' => match chars.next() {
                 Some(digit) if digit.is_ascii_digit() => {
+                    let group = digit as usize - '0' as usize;
                     out.push_str("${");
-                    out.push(digit);
+                    out.push_str(&extent.group(group).to_string());
                     out.push('}');
                 }
                 Some(other) => out.push(other),
@@ -328,9 +346,91 @@ fn translate(replacement: &str) -> String {
     out
 }
 
+/// What one match becomes: the replacement, with the match and its groups in it.
+pub(crate) fn expand(
+    caps: &regex::Captures<'_>,
+    extent: &crate::dialect::Extent,
+    replacement: &str,
+    text: &str,
+) -> String {
+    let mut out = String::with_capacity(replacement.len());
+    expand_into(caps, extent, replacement, text, &mut out);
+    out
+}
+
+/// The same, into a string that is already being built.
+///
+/// The engine's own `expand` is what reads `${1}` and `${name}`, and it is used
+/// here so that a replacement is read the same way it always was — with one
+/// thing the engine cannot say: `${0}` is the text the engine matched, while
+/// what `&` and `\0` mean, and what `\zs` and `\ze` can move, is the part the
+/// pattern *reports*. That part goes in first, as text, with its own `$`
+/// escaped so that nothing in it can be read as a group reference.
+fn expand_into(
+    caps: &regex::Captures<'_>,
+    extent: &crate::dialect::Extent,
+    replacement: &str,
+    text: &str,
+    out: &mut String,
+) {
+    if extent.is_empty() {
+        caps.expand(replacement, out);
+        return;
+    }
+    let (start, end) = extent.span(caps);
+    let matched = text[start..end].replace('$', "$$");
+    caps.expand(&replacement.replace("${0}", &matched), out);
+}
+
+/// Replace what a pattern finds in one line, and how many places that was.
+///
+/// The engine's own `replace_all` cannot be used — it replaces the text the
+/// pattern matched, and a pattern with `\zs` or `\ze` reports less than that —
+/// so the line is walked match by match. `all` is the `g` flag: without it, only
+/// the first match on the line is replaced, which is what `replacen` did.
+pub(crate) fn replace_line(
+    regex: &regex::Regex,
+    extent: &crate::dialect::Extent,
+    replacement: &str,
+    line: &str,
+    all: bool,
+) -> (String, usize) {
+    let mut out = String::with_capacity(line.len());
+    let mut last = 0;
+    let mut count = 0;
+    for caps in regex.captures_iter(line) {
+        if count == 1 && !all {
+            break;
+        }
+        let (start, end) = extent.span(&caps);
+        // What is between the last match and this one is the line's own text,
+        // and matches do not overlap, so these two ends only move forward.
+        out.push_str(&line[last..start]);
+        expand_into(&caps, extent, replacement, line, &mut out);
+        last = end;
+        count += 1;
+    }
+    out.push_str(&line[last..]);
+    (out, count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The replacement side of a `:` line, translated with no markers in it.
+    fn out(input: &str) -> String {
+        translate(input, &crate::dialect::Extent::default())
+    }
+
+    /// `:s` over one line, through the same walk the editor does.
+    fn spliced(line: &str, spec: &Substitute) -> String {
+        let regex = regex::RegexBuilder::new(&spec.translated)
+            .case_insensitive(spec.ignore_case)
+            .build()
+            .expect("the test's pattern compiles");
+        replace_line(&regex, &spec.extent, &spec.replacement, line, spec.all).0
+    }
 
     #[test]
     fn a_range_can_name_a_mark() {
@@ -383,7 +483,9 @@ mod tests {
             spec,
             Substitute {
                 pattern: "one".into(),
+                translated: "one".into(),
                 replacement: "two".into(),
+                extent: crate::dialect::Extent::default(),
                 all: true,
                 from: Some(Address::Line(1)),
                 to: Some(Address::Last),
@@ -505,28 +607,88 @@ mod tests {
 
     #[test]
     fn the_replacement_is_translated_out_of_vims_dialect() {
-        assert_eq!(translate("two"), "two");
-        assert_eq!(translate("a&b"), "a${0}b", "`&` is the whole match");
+        assert_eq!(out("two"), "two");
+        assert_eq!(out("a&b"), "a${0}b", "`&` is the whole match");
         assert_eq!(
-            translate("\\1-\\2"),
+            out("\\1-\\2"),
             "${1}-${2}",
             "`\\1` is a group, written with braces so `\\1_` cannot be read as a name"
         );
-        assert_eq!(translate("\\&"), "&", "and `\\&` is an ampersand");
+        assert_eq!(out("\\&"), "&", "and `\\&` is an ampersand");
         assert_eq!(
-            translate("$1"),
+            out("$1"),
             "${1}",
             "the engine's own spelling still works, and is normalised"
         );
-        assert_eq!(translate("${2}_x"), "${2}_x", "a braced one is left alone");
+        assert_eq!(out("${2}_x"), "${2}_x", "a braced one is left alone");
         assert_eq!(
-            translate("\\2_\\1"),
+            out("\\2_\\1"),
             "${2}_${1}",
             "which is the difference between the second group and a group named `2_`"
         );
-        assert_eq!(translate("$"), "$$", "a lone `$` is a dollar sign");
-        assert_eq!(translate("a$b"), "a$$b");
-        assert_eq!(translate("\\\\"), "\\", "and `\\\\` is a backslash");
+        assert_eq!(out("$"), "$$", "a lone `$` is a dollar sign");
+        assert_eq!(out("a$b"), "a$$b");
+        assert_eq!(out("\\\\"), "\\", "and `\\\\` is a backslash");
+    }
+
+    #[test]
+    fn a_group_is_the_one_the_pattern_wrote_and_not_the_engine_that_matched_it() {
+        // `\zs` is a group of its own in the engine — an empty one, where the
+        // match starts — so `\1` has to be read as the pattern's own first
+        // group rather than the engine's.
+        let spec = Substitute::parse("s/\\(a\\)\\zsb/X\\1/", false, false).expect("parses");
+        assert_eq!(spec.translated, "(a)()b");
+        assert_eq!(spec.replacement, "X${1}");
+        assert_eq!(spliced("ab", &spec), "aXa");
+
+        // A group written after a marker is the engine's third, and it still
+        // answers to `\2` when the replacement asks for it.
+        let spec =
+            Substitute::parse("s/\\zs\\(a\\)\\(b\\)/\\1-\\2/", false, false).expect("parses");
+        assert_eq!(spec.translated, "()(a)(b)");
+        assert_eq!(spec.replacement, "${2}-${3}");
+        assert_eq!(spliced("ab", &spec), "a-b");
+    }
+
+    #[test]
+    fn what_a_match_is_is_the_part_the_pattern_reports() {
+        // `&` is the match, and a match that `\zs` and `\ze` moved is the part
+        // they left — vim's own reading of the two.
+        let spec = Substitute::parse("s/a\\zsb/[&]/", false, false).expect("parses");
+        assert_eq!(spliced("ab", &spec), "a[b]");
+        let spec = Substitute::parse("s/end\\ze\\(if\\|for\\)/X/", false, false).expect("parses");
+        assert_eq!(spliced("endif", &spec), "Xif");
+        // A match of nothing is a place to put the replacement: an empty one
+        // at the end of "ab" is where the match stopped.
+        let spec = Substitute::parse("s/a\\zs\\zeb/X/", false, false).expect("parses");
+        assert_eq!(spliced("ab", &spec), "aXb");
+    }
+
+    #[test]
+    fn a_line_without_markers_is_replaced_the_way_the_engine_replaces_it() {
+        // The walk is new code, and the engine's own `replace_all` is what it
+        // has to agree with whenever a pattern says nothing about where the
+        // match is.
+        for line in [
+            "s/a/X/", "s/a/X/g", "s/a*/X/g", "s/^/> /g", "s/e$/E/g", "s/&/&&/g",
+        ] {
+            let spec = Substitute::parse(line, false, false).expect("parses");
+            let regex = regex::RegexBuilder::new(&spec.translated)
+                .build()
+                .expect("compiles");
+            for text in ["", "a", "baab", "one two", "aaa"] {
+                let engine = if spec.all {
+                    regex
+                        .replace_all(text, spec.replacement.as_str())
+                        .into_owned()
+                } else {
+                    regex
+                        .replacen(text, 1, spec.replacement.as_str())
+                        .into_owned()
+                };
+                assert_eq!(spliced(text, &spec), engine, "{line} on {text:?}");
+            }
+        }
     }
 
     #[test]

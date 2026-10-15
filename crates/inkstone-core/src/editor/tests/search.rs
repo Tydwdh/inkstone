@@ -167,10 +167,18 @@ fn a_pattern_is_written_the_vim_way() {
     ed.cursor = Cursor::new(0, 0);
     ed.run_search("\\<beta\\>", crate::search::Direction::Forward);
     assert_eq!(ed.cursor.row, 0, "the one word `beta`");
-    // Something that cannot be done here says so rather than matching
-    // something else.
-    ed.execute_cmdline("%s/a\\zsb/x/");
-    assert!(ed.message.contains("not supported"), "{}", ed.message);
+    // A pattern can say where its own match begins and ends: `\zs` moves the
+    // start along and `\ze` the end back, and what they leave is the match.
+    ed.buffer = Buffer::from_text("foobar\n");
+    ed.execute_cmdline("s/foo\\zsbar/X/");
+    assert_eq!(ed.buffer.text(), "fooX\n", "the `bar` is the match");
+    ed.buffer = Buffer::from_text("foobar\n");
+    ed.execute_cmdline("s/foo\\zebar/end/");
+    assert_eq!(
+        ed.buffer.text(),
+        "endbar\n",
+        "the `bar` is still matched, and still not part of the match"
+    );
 }
 
 #[test]
@@ -327,7 +335,7 @@ fn a_preview_that_finds_nothing_says_nothing() {
 
     // Nor is a pattern that does not compile — a half-typed one is normal.
     feed(&mut ed, "<Esc>");
-    feed(&mut ed, "/\\zs");
+    feed(&mut ed, "/(unclosed");
     assert_eq!(ed.message, "");
     assert_eq!(ed.cursor, Cursor::new(0, 0));
     feed(&mut ed, "<Esc>");
@@ -335,8 +343,19 @@ fn a_preview_that_finds_nothing_says_nothing() {
     // The line itself still reports both, when it is accepted.
     feed(&mut ed, "/zzz<Enter>");
     assert_eq!(ed.message, "E486: Pattern not found: zzz");
-    feed(&mut ed, "/\\zs<Enter>");
+    feed(&mut ed, "/(unclosed<Enter>");
     assert!(ed.message.starts_with("E54: "), "{}", ed.message);
+}
+
+#[test]
+fn a_search_finds_the_part_of_a_match_the_pattern_reports() {
+    // `\zs` and `\ze` move the ends of a match, and the cursor goes to the
+    // match the pattern reports rather than to the text the engine matched.
+    let mut ed = Editor::for_tests();
+    ed.buffer = Buffer::from_text("alpha beta\n");
+    feed(&mut ed, "/alpha \\zsbeta<Enter>");
+    assert_eq!(ed.search.matches(), &[(6, 10)], "the part highlighted");
+    assert_eq!(ed.cursor, Cursor::new(0, 6), "and where the cursor goes");
 }
 
 #[test]
@@ -714,13 +733,15 @@ fn a_substitute_that_finds_nothing_says_so() {
     assert!(ed.message.starts_with("E54: "), "{}", ed.message);
     assert!(!ed.is_dirty());
 
-    // A pattern that asks where a match starts inside itself is refused, and
-    // named: the engine cannot cut a match in half, and the refusal is
-    // already an `E54` — it must not say `E54: E: …`.
-    feed(&mut ed, ":s/\\zs/x/<Enter>");
+    // A pattern that asks for something this cannot do is refused, and named.
+    // The refusal is already an `E54` — it must not say `E54: E: …`.
+    feed(&mut ed, ":s/\\zs*/x/<Enter>");
+    assert_eq!(ed.message, "E54: \\zs cannot be followed by a multi");
+    assert!(!ed.is_dirty());
+    feed(&mut ed, ":s/[\\zs]/x/<Enter>");
     assert_eq!(
         ed.message,
-        "E54: \\zs is not supported: a match here is a stretch of text and cannot be cut in half"
+        "E54: \\zs is not supported inside a collection: vim reads it there as characters"
     );
     assert!(!ed.is_dirty());
 }
@@ -732,10 +753,10 @@ fn a_refused_pattern_says_which_one_and_why() {
     // supported, and the reason.
     let mut ed = Editor::for_tests();
     ed.buffer = Buffer::from_text("one\n");
-    feed(&mut ed, "/\\zs<Enter>");
+    feed(&mut ed, "/[\\zs]<Enter>");
     assert_eq!(
         ed.message,
-        "E54: \\zs is not supported: a match here is a stretch of text and cannot be cut in half"
+        "E54: \\zs is not supported inside a collection: vim reads it there as characters"
     );
 }
 

@@ -17,15 +17,24 @@
   decided once, at startup, decided about no file at all. The daemon also ticks
   whether or not a server is running yet, since the tick that starts one is the
   one before there is one.
-- A pattern this editor refuses to translate — `\zs` or `\ze`, which would move
-  where a match starts or ends inside itself — now says the same thing wherever
-  it is typed. A `:s` said `E: \zs is not supported: …`, the code cut down to a
-  bare `E:`; the same refusal through `/` said `E54: E: \zs is not supported: …`,
-  the code twice. The code belongs to the error that knows it is an `E54` and
-  not to the sentence both share, so both now read `E54: \zs is not supported: a
-  match here is a stretch of text and cannot be cut in half`.
+- A pattern this editor refuses to translate now says the same thing wherever it
+  is typed. A `:s` said `E: … is not supported: …`, the code cut down to a bare
+  `E:`; the same refusal through `/` said `E54: E: …`, the code twice. The code
+  belongs to the error that knows it is an `E54` and not to the sentence both
+  share, so both now read `E54: \zs cannot be followed by a multi`.
 
 ### Added
+- `\zs` and `\ze` in a pattern, which "set the start and end of the match": each
+  becomes an empty group where it matched, and the part of a match the pattern
+  *reports* — the cells a search highlights and the text `:s` replaces — is read
+  back from there. Vim's own rules, including the awkward ones: either may be
+  said several times and the last one encountered in a matching branch is the one
+  that counts, a `\ze` before the `\zs` is no end at all, and `&` in a
+  replacement is the reported match while `\1` is still the pattern's own first
+  group — the markers are groups too, and the numbers are what a replacement
+  means by them. A `\zs` inside a collection, or one followed by a multi, is
+  refused rather than guessed at (vim reads the first as characters and refuses
+  the second itself).
 - `{Visual}gf`: the highlighted text is the name of the file to open — "same as
   "gf", but the highlighted text is used as the name of the file to edit. 'isfname'
   is ignored" — which is the only way to open a name with a space in it, since the

@@ -9,13 +9,15 @@
 //! pattern can never match a line break, which is a limitation vim does not
 //! have — and one worth naming out loud rather than discovering.
 //!
-//! # Patterns are regular expressions
+//! # Patterns are vim's, translated
 //!
-//! Rust's dialect of them: `\d+`, `^`, `$`, `(groups)`, `(?i)` — not vim's
-//! (`\(`, `\<`, `\zs`), which would be a second dialect to learn and to
-//! escape. A pattern that does not compile is reported rather than silently
-//! matching nothing, because "nothing found" and "I do not understand you" are
-//! different answers to the same keystroke.
+//! A pattern is typed the way vim types one — `\<word\>`, `s/\(a\|b\)/x/`, and
+//! the `\zs` and `\ze` that move where a match starts and ends — and goes
+//! through `dialect` before it is compiled, so the engine sees a pattern of its
+//! own spelling and a person types vim's. A pattern that does not
+//! compile is reported rather than silently matching nothing, because "nothing
+//! found" and "I do not understand you" are different answers to the same
+//! keystroke.
 //!
 //! # Character indices
 //!
@@ -28,6 +30,7 @@
 use regex::{Regex, RegexBuilder};
 
 use crate::buffer::Buffer;
+use crate::dialect::Extent;
 
 /// Which way a search runs, and which way `n` runs after it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -81,6 +84,8 @@ pub struct Search {
     pattern: String,
     /// The pattern, compiled. `None` until a search has been run.
     compiled: Option<Regex>,
+    /// Where `\zs` and `\ze` put the ends of a match, if the pattern has any.
+    extent: Extent,
     direction: Direction,
     matches: Vec<(usize, usize)>,
     ignore_case: bool,
@@ -92,6 +97,7 @@ impl Search {
         Self {
             pattern: String::new(),
             compiled: None,
+            extent: Extent::default(),
             direction: Direction::Forward,
             matches: Vec::new(),
             ignore_case: false,
@@ -142,6 +148,7 @@ impl Search {
             .build()?;
         self.pattern = pattern.to_string();
         self.compiled = Some(compiled);
+        self.extent = translated.extent;
         self.direction = direction;
         self.ignore_case = ignore_case;
         self.refresh(buffer);
@@ -151,7 +158,7 @@ impl Search {
     /// Find the matches again, after the buffer changed.
     pub(crate) fn refresh(&mut self, buffer: &Buffer) {
         self.matches = match &self.compiled {
-            Some(regex) => find(buffer, regex),
+            Some(regex) => find(buffer, regex, &self.extent),
             None => Vec::new(),
         };
     }
@@ -160,6 +167,7 @@ impl Search {
     pub fn clear(&mut self) {
         self.pattern.clear();
         self.compiled = None;
+        self.extent = Extent::default();
         self.matches.clear();
     }
 
@@ -210,19 +218,35 @@ impl Search {
 /// Matches do not overlap; the engine decides that, and it is the same rule for
 /// every pattern. A match of nothing at all — `^` on its own — is not collected:
 /// it has no cells to highlight and nowhere for the cursor to go.
-fn find(buffer: &Buffer, regex: &Regex) -> Vec<(usize, usize)> {
+///
+/// What is collected is the part of the match the pattern *reports*, which
+/// `\zs` and `\ze` can make shorter than what the engine matched — that is what
+/// [`Extent`] reads back from the groups those markers became. A pattern
+/// without them is read with `find_iter`, which does not have to remember where
+/// any group landed.
+fn find(buffer: &Buffer, regex: &Regex, extent: &Extent) -> Vec<(usize, usize)> {
     let mut found = Vec::new();
     for line in 0..buffer.line_count() {
         let text = buffer.line_string(line);
         let line_start = buffer.line_col_to_char(line, 0);
-        for hit in regex.find_iter(&text) {
-            if hit.is_empty() {
-                continue;
+        let mut keep = |start: usize, end: usize| {
+            if start == end {
+                return;
             }
             found.push((
-                line_start + text[..hit.start()].chars().count(),
-                line_start + text[..hit.end()].chars().count(),
+                line_start + text[..start].chars().count(),
+                line_start + text[..end].chars().count(),
             ));
+        };
+        if extent.is_empty() {
+            for hit in regex.find_iter(&text) {
+                keep(hit.start(), hit.end());
+            }
+        } else {
+            for caps in regex.captures_iter(&text) {
+                let (start, end) = extent.span(&caps);
+                keep(start, end);
+            }
         }
     }
     found
@@ -394,6 +418,53 @@ mod tests {
             matches_of("a.c\n", "a\\.c", false),
             vec![(0, 3)],
             "an escaped dot is a dot"
+        );
+    }
+
+    #[test]
+    fn a_match_can_say_where_it_starts_and_ends() {
+        // `\zs` and `\ze` move the ends of the match, and what is found is
+        // what the pattern reports rather than what the engine matched.
+        assert_eq!(matches_of("ab\n", "a\\zsb", false), vec![(1, 2)]);
+        assert_eq!(
+            matches_of("endif endfor\n", "end\\ze\\(if\\|for\\)", false),
+            vec![(0, 3), (6, 9)],
+            "`\\ze` on its own: the match ends where it says"
+        );
+        assert_eq!(
+            matches_of("abc\n", "b\\zs", false),
+            vec![],
+            "a match that ends where it starts highlights nothing"
+        );
+        assert_eq!(
+            matches_of("abc\n", "\\zsabc", false),
+            vec![(0, 3)],
+            "and one that starts where the whole match does"
+        );
+        // Vim's own example: `\(.\{-}\zsFab\)\{3}` finds the *third* "Fab",
+        // because the marker inside the group that repeats is read back from
+        // the last time the group matched.
+        assert_eq!(
+            matches_of("FabFabFab\n", "\\(.\\{-}\\zsFab\\)\\{3}", false),
+            vec![(6, 9)]
+        );
+        // And the last one *encountered* wins in a pattern with branches,
+        // which is not the last one written: this matches "ab", "cd", "ab",
+        // and the marker in the branch that matched last is the one that
+        // counts — where the `b` of the third group begins.
+        assert_eq!(
+            matches_of("abcdab\n", "\\(a\\zsb\\|c\\zsd\\)\\{3}", false),
+            vec![(5, 6)]
+        );
+        // A `\ze` before the `\zs` is no end at all, so the match ends where
+        // it always did.
+        assert_eq!(matches_of("abc\n", "a\\zeb\\zsc", false), vec![(2, 3)]);
+        assert_eq!(matches_of("abc\n", "\\zsa\\zeb\\zsc", false), vec![(2, 3)]);
+        // A marker that took no part does not count.
+        assert_eq!(
+            matches_of("b\n", "\\(a\\zs\\)\\?b", false),
+            vec![(0, 1)],
+            "the group was never entered, so nothing was moved"
         );
     }
 

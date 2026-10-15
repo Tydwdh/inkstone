@@ -258,7 +258,7 @@ impl Editor {
         &mut self,
         spec: &Substitute,
     ) -> Result<(usize, usize), crate::search::PatternError> {
-        let pattern = regex::RegexBuilder::new(&spec.pattern)
+        let pattern = regex::RegexBuilder::new(&spec.translated)
             .case_insensitive(spec.ignore_case)
             .build()
             .map_err(crate::search::PatternError::from)?;
@@ -270,20 +270,20 @@ impl Editor {
         let mut count = 0;
         for row in rows {
             let line = self.buffer.line_string(row);
-            let found = pattern.find_iter(&line).count();
-            if found == 0 {
+            // What is replaced is the part of a match the pattern reports,
+            // which `\zs` and `\ze` can make shorter than the text it matched.
+            let (replaced, found) = crate::substitute::replace_line(
+                &pattern,
+                &spec.extent,
+                &spec.replacement,
+                &line,
+                spec.all,
+            );
+            if found == 0 || replaced == line.as_str() {
                 continue;
             }
-            let replaced = if spec.all {
-                pattern.replace_all(&line, spec.replacement.as_str())
-            } else {
-                pattern.replacen(&line, 1, spec.replacement.as_str())
-            };
-            if replaced == line.as_str() {
-                continue;
-            }
-            count += if spec.all { found } else { 1 };
-            replacements.push((row, replaced.into_owned()));
+            count += found;
+            replacements.push((row, replaced));
         }
         let Some((first, _)) = replacements.first() else {
             return Ok((0, 0));

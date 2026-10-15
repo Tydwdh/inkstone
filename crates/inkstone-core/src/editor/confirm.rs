@@ -14,7 +14,7 @@ impl Editor {
         &mut self,
         spec: &Substitute,
     ) -> Result<(), crate::search::PatternError> {
-        let pattern = regex::RegexBuilder::new(&spec.pattern)
+        let pattern = regex::RegexBuilder::new(&spec.translated)
             .case_insensitive(spec.ignore_case)
             .build()
             .map_err(crate::search::PatternError::from)?;
@@ -47,14 +47,20 @@ impl Editor {
             let line = self.buffer.line_string(row);
             let chars: Vec<char> = line.chars().collect();
             let rest: String = chars.iter().skip(state.from).collect();
-            match state.pattern.find(&rest) {
-                Some(found) => {
-                    let start = state.from + rest[..found.start()].chars().count();
-                    let end = start + found.as_str().chars().count();
-                    let replacement = state
-                        .pattern
-                        .replace(found.as_str(), state.spec.replacement.as_str())
-                        .into_owned();
+            match state.pattern.captures(&rest) {
+                Some(caps) => {
+                    // What is asked about is the part of the match the pattern
+                    // reports, which `\zs` and `\ze` can make shorter than the
+                    // text the engine matched.
+                    let (start, end) = state.spec.extent.span(&caps);
+                    let start = state.from + rest[..start].chars().count();
+                    let end = state.from + rest[..end].chars().count();
+                    let replacement = crate::substitute::expand(
+                        &caps,
+                        &state.spec.extent,
+                        state.spec.replacement.as_str(),
+                        &rest,
+                    );
                     state.asking = Some((row, start, end, replacement));
                     state.asked = true;
                     let prompt = state.prompt();

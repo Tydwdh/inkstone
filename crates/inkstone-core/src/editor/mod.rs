@@ -1250,6 +1250,10 @@ pub struct Editor {
     pub(crate) terminal_input: Vec<u8>,
     /// Set by `:kill`, taken by the session that owns the pty.
     pub(crate) terminal_kill: bool,
+    /// Where a relative path the user names leads from — `:cd`, and the
+    /// directory a listing is showing. Not the process's directory: the editor
+    /// has its own idea of where it is, the way a terminal does.
+    pub(crate) cwd: std::path::PathBuf,
     /// The last command that changed something, with the arguments it was run
     /// with: `.` runs it again.
     pub(crate) last_command: Option<(String, Vec<Param>)>,
@@ -1389,6 +1393,7 @@ impl Editor {
             terminal: None,
             terminal_input: Vec::new(),
             terminal_kill: false,
+            cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             last_command: None,
             last_insert: None,
             insert_log: None,

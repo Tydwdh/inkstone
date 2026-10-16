@@ -2,7 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+- A name typed inside a directory listing is relative to **that directory**, not
+  to where the daemon happened to be started. `:e main.rs` inside a listing of
+  `src/` opened a new, empty buffer next to the process's own directory; it opens
+  `src/main.rs`. A directory shown as a listing is now the session's directory —
+  netrw's behaviour, and the reason it has one — and the same resolution covers
+  `:e`, `:w {name}`, `:r {file}`, `:sp`/`:vs`, `gf` and `:vimgrep`'s arguments.
+  Shells and `:term` start there too, so `:!cargo build` builds what is on the
+  screen.
+
 ### Added
+- `:cd [dir]` and `:pwd`: where relative names lead from, and where that is. No
+  argument is the home directory, which is vim's rule, and a directory that is not
+  there is refused with `E344` rather than half-taken.
 - `:term [program]` runs a program that *draws*: on a pty of its own, with its
   screen in a window of the editor, in a buffer of its own. The keys are the
   program's from the first moment — insert mode is the program's, and the status

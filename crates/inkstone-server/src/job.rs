@@ -76,8 +76,12 @@ impl Job {
 /// because what a person types on a `:` line is a command *line*: quoting, pipes
 /// and redirection are the shell's business, and splitting it here would be a
 /// second, worse shell.
-pub(crate) fn spawn(command: &str, input: Option<&str>) -> std::io::Result<Job> {
-    let mut child = shell(command)
+pub(crate) fn spawn(
+    command: &str,
+    input: Option<&str>,
+    cwd: &std::path::Path,
+) -> std::io::Result<Job> {
+    let mut child = shell(command, cwd)
         .stdin(match input {
             Some(_) => Stdio::piped(),
             None => Stdio::null(),
@@ -157,9 +161,13 @@ pub(crate) fn spawn(command: &str, input: Option<&str>) -> std::io::Result<Job> 
 }
 
 /// The shell that runs a command line, with nothing of its own to show for it.
-fn shell(command: &str) -> Command {
+///
+/// It runs in the session's directory: `:!cargo build` should build what a person
+/// is looking at, not what the daemon happened to be started in.
+fn shell(command: &str, cwd: &std::path::Path) -> Command {
     if cfg!(windows) {
         let mut shell = Command::new("cmd");
+        shell.current_dir(cwd);
         shell.arg("/C").arg(command);
         // A console window of its own is not what a command from an editor
         // wants, and the windowed frontend has none to give it: without this
@@ -174,6 +182,7 @@ fn shell(command: &str) -> Command {
     } else {
         let mut shell = Command::new("sh");
         shell.arg("-c").arg(command);
+        shell.current_dir(cwd);
         shell
     }
 }

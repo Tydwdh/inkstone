@@ -7,12 +7,85 @@ use crate::mode::Mode;
 
 use super::*;
 
+/// A directory as a person would write it: without the `.` components the
+/// editor's own joins leave behind, and without the prefix Windows puts on a
+/// canonical path.
+fn tidy_dir(path: &Path) -> PathBuf {
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    crate::command::tidy(resolved)
+}
+
 impl Editor {
+    /// Where the session is, for a shell or a program to start in: `:!cargo
+    /// build` should build what a person is looking at, not what the daemon
+    /// happened to be started in.
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    /// Where a path the user named leads.
+    ///
+    /// Relative to the *session's* directory, not to the process's. That is what
+    /// makes `:e main.rs` inside a listing of `src/` mean `src/main.rs`: the
+    /// directory a person is looking at is the directory they mean, which is
+    /// netrw's behaviour and the reason it has one. An absolute path is left
+    /// alone, so nothing that already knows where it is goes through here twice.
+    pub(crate) fn resolve(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.cwd.join(path)
+        }
+    }
+
+    /// `:cd [dir]` — where relative paths lead from now on.
+    ///
+    /// No argument is the home directory, which is vim's rule; a directory that
+    /// is not there is refused rather than half-taken, because every path after
+    /// it would be relative to somewhere that does not exist.
+    pub(crate) fn change_dir(&mut self, dir: Option<&Path>) {
+        let target = match dir {
+            Some(dir) => self.resolve(dir),
+            None => match std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+                Some(home) => PathBuf::from(home),
+                None => {
+                    self.message = "E344: Can't find directory".to_string();
+                    return;
+                }
+            },
+        };
+        if !target.is_dir() {
+            self.message = format!("E344: Can't find directory: {}", target.display());
+            return;
+        }
+        self.cwd = target;
+        self.message = self.cwd.display().to_string();
+        self.redraw = true;
+    }
+
+    /// `:pwd` — where the session thinks it is.
+    pub(crate) fn print_dir(&mut self) {
+        self.message = self.cwd.display().to_string();
+        self.redraw = true;
+    }
+
+    /// A directory that is being looked at is the directory a person is in.
+    ///
+    /// Vim's netrw changes the local directory when it shows one — that is how a
+    /// file manager makes `:e name` mean the name beside it — and this is the
+    /// same rule, said once, in the one place every listing arrives through.
+    pub(super) fn note_directory(&mut self) {
+        if let Some(dir) = self.buffer.path().filter(|_| self.buffer.is_listing()) {
+            self.cwd = tidy_dir(dir);
+        }
+    }
+
     /// Replace the buffer with the contents of `path`.
     pub fn load_file(&mut self, path: &Path) -> Result<(), BufferError> {
-        let buffer = Buffer::from_path(path)?;
+        let path = self.resolve(path);
+        let buffer = Buffer::from_path(&path)?;
         self.buffer = buffer;
-        self.highlighter.set_language(Language::from_path(path));
+        self.highlighter.set_language(Language::from_path(&path));
         self.cursor = Cursor::default();
         // The history belongs to the document that was open: its steps hold
         // character indices into it, so they cannot be replayed onto this one.
@@ -29,6 +102,7 @@ impl Editor {
         // Diagnostics were about the text that was here, and it is not.
         self.diagnostics.clear();
         self.selection = None;
+        self.note_directory();
         self.message = format!("\"{}\"", self.buffer.display_name());
         self.redraw = true;
         Ok(())
@@ -117,7 +191,8 @@ impl Editor {
     /// what it formatted cannot drift apart: both go through here, and both leave
     /// the saved marker where a person would expect it.
     pub fn write_buffer(&mut self, path: Option<&Path>) -> Result<PathBuf, BufferError> {
-        let path = self.buffer.save(path)?;
+        let resolved = path.map(|path| self.resolve(path));
+        let path = self.buffer.save(resolved.as_deref())?;
         // The state that is on disk now is the one being looked at: say so, so
         // undoing away from it and back to it keeps the marker honest.
         self.history.mark_saved();

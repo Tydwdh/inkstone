@@ -35,7 +35,12 @@ pub(crate) struct Terminal {
 impl Terminal {
     /// Start `program` — a command line, or nothing for the platform's shell —
     /// on a pty of this size.
-    pub(crate) fn spawn(program: &str, cols: usize, rows: usize) -> Result<Self> {
+    pub(crate) fn spawn(
+        program: &str,
+        cols: usize,
+        rows: usize,
+        cwd: &std::path::Path,
+    ) -> Result<Self> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -46,7 +51,7 @@ impl Terminal {
             })
             .context("failed to open a pty")?;
 
-        let command = shell_command(program);
+        let command = shell_command(program, cwd);
         let child = pair
             .slave
             .spawn_command(command)
@@ -155,20 +160,24 @@ impl Terminal {
 ///
 /// The same rule as `:!`: what a person types is a command *line*, and the shell
 /// is what knows how to read one.
-fn shell_command(program: &str) -> CommandBuilder {
+fn shell_command(program: &str, cwd: &std::path::Path) -> CommandBuilder {
     let program = program.trim();
     if program.is_empty() {
-        return CommandBuilder::new_default_prog();
+        let mut command = CommandBuilder::new_default_prog();
+        command.cwd(cwd);
+        return command;
     }
     if cfg!(windows) {
         let mut command = CommandBuilder::new("cmd");
         command.arg("/C");
         command.arg(program);
+        command.cwd(cwd);
         command
     } else {
         let mut command = CommandBuilder::new("sh");
         command.arg("-c");
         command.arg(program);
+        command.cwd(cwd);
         command
     }
 }

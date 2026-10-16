@@ -32,10 +32,11 @@ up there, so a directory arrives as a listing without a line of code that knows
 listings exist. `gf` needed one change to go with it: it refused a name that was
 not a file, and a directory is a name a person can put the cursor on.
 
-The path is kept **as it was given**, not resolved. It is what the status line
-shows (with the platform's separator, so that a listing reads as the directory
-it is: `./`, `src/`), what a save hands back to the filesystem, and what `-`
-walks up from. Resolving it would make `:e .` announce a path nobody typed.
+The path is what the **session's directory** resolved it to, which is what the
+status line shows (with the platform's separator, so that a listing reads as the
+directory it is) and what `-` walks up from. See "Where a relative name leads"
+below: a name that is not absolute becomes one, because the session's directory is
+not the process's.
 
 Directories come first and each group is sorted by name, the way `:vimgrep`
 walks a directory: one order in the codebase, and walking down is what a listing
@@ -107,6 +108,28 @@ work — writing is what makes them true — and the one thing an editor must no
 is drop them quietly. This was the bug the smoke run caught: the first version
 navigated and lost the edits, and no unit test had asked for the refusal.
 
+## Where a relative name leads
+
+The process's directory never moves — the daemon was started somewhere and that
+is that — so a relative name has to be relative to something the editor owns: the
+*session's* directory.
+
+`:cd {dir}` sets it and `:pwd` says what it is, and **a directory opened as a
+listing sets it too**, which is the point of the whole thing: the directory a
+person is looking at is the directory they mean, so `:e main.rs` inside a listing
+of `src/` is `src/main.rs`. This is netrw's behaviour — it changes the local
+directory when it shows one, which is why a file manager makes relative names
+work — and it was the report that started this: `:e main.rs` inside `src/` used to
+open a new, empty buffer where the daemon happened to be started.
+
+Every name a person types goes through it: `:e`, `:w {name}`, `:r {file}`, `:sp`
+and `:vs`, `gf`'s fallback when the file that is open is no help, and
+`:vimgrep`'s arguments. A shell and a `:term` start there too, so `:!cargo build`
+builds what is on the screen rather than what is where the daemon was started.
+An absolute path is left alone, and everything a document knows about itself —
+its own path, a language server's file names — is absolute already, so nothing is
+resolved twice.
+
 ## What is not here
 
 - No tree or browser: a listing is one directory, and walking is `<CR>` and `-`.
@@ -117,8 +140,6 @@ navigated and lost the edits, and no unit test had asked for the refusal.
   the line says is the name and whether it is a directory.
 - No way to make a directory's *contents*: a listing makes empty directories,
   because that is what one line can say.
-- No sorting options, no showing hidden files by another rule, no `cd` and no
-  `:pwd`: a relative path is relative to the directory the daemon was started in,
-  and that is that.
+- No sorting options and no showing hidden files by another rule.
 - `:bd` on a listing forgets it like any document; nothing closes the directory
   a person walked out of.

@@ -195,8 +195,9 @@ impl Editor {
     /// up. The file is read first, so a path that is not there leaves the editor
     /// as it was.
     pub(crate) fn open_file(&mut self, path: &Path) -> Result<(), BufferError> {
-        let buffer = Buffer::from_path(path)?;
-        let language = Language::from_path(path);
+        let path = self.resolve(path);
+        let buffer = Buffer::from_path(&path)?;
+        let language = Language::from_path(&path);
         self.save_document();
         self.documents.push(Document::new(buffer, language));
         self.windows[self.current_window].document = self.documents.len() - 1;
@@ -211,6 +212,7 @@ impl Editor {
         self.cursor = Cursor::default();
         self.viewport.top_line = 0;
         self.viewport.left_col = 0;
+        self.note_directory();
         self.after_switch();
         Ok(())
     }
@@ -220,8 +222,9 @@ impl Editor {
     /// This is what `:sp file` needs: the file has to join the list, and the
     /// window that asked for the split keeps what it had.
     pub(crate) fn add_file(&mut self, path: &Path) -> Result<usize, BufferError> {
-        let buffer = Buffer::from_path(path)?;
-        let language = Language::from_path(path);
+        let path = self.resolve(path);
+        let buffer = Buffer::from_path(&path)?;
+        let language = Language::from_path(&path);
         self.documents.push(Document::new(buffer, language));
         Ok(self.documents.len() - 1)
     }

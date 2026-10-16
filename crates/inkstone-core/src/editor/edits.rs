@@ -727,6 +727,7 @@ impl Editor {
         to: usize,
         path: &Path,
     ) -> Result<usize, BufferError> {
+        let path = &self.resolve(path);
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));
@@ -766,6 +767,7 @@ impl Editor {
         to: usize,
         path: &Path,
     ) -> Result<usize, BufferError> {
+        let path = &self.resolve(path);
         let last = self.buffer.line_count().saturating_sub(1);
         let (from, to) = (from.min(last), to.min(last));
         let (from, to) = (from.min(to), from.max(to));

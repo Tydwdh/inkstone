@@ -1138,7 +1138,8 @@ impl Session {
         self.editor.run_pending_lua();
         if self.running.is_none() {
             if let Some(request) = self.editor.job_request() {
-                match job::spawn(&request.command, request.input.as_deref()) {
+                let cwd = self.editor.cwd().to_path_buf();
+                match job::spawn(&request.command, request.input.as_deref(), &cwd) {
                     Ok(running) => self.running = Some(running),
                     Err(error) => self.editor.job_failed(error.to_string()),
                 }
@@ -1190,7 +1191,8 @@ impl Session {
         if self.terminal.is_none() {
             if let Some(program) = self.editor.take_terminal_request() {
                 let (cols, rows) = self.editor.terminal_size();
-                match Terminal::spawn(&program, cols, rows) {
+                let cwd = self.editor.cwd().to_path_buf();
+                match Terminal::spawn(&program, cols, rows, &cwd) {
                     Ok(terminal) => self.terminal = Some(terminal),
                     Err(error) => {
                         self.editor.terminal_exited(None);

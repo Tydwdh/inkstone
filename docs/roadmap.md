@@ -3566,6 +3566,34 @@ it, as the rule asks, and it was right about the important part: this one did
   over a pty as well: a real `cmd.exe` running in a window of the editor, typed
   at, answering, and exiting into its own scrollback.
 
+## Done — the session's directory
+
+A report from using it: `:e main.rs` inside a listing of `src/` opened a new,
+empty buffer. The path resolution was the process's directory — which never
+moves — so a relative name meant "wherever the daemon was started", however
+clearly a person was looking at somewhere else.
+
+- **What shipped:** the editor has a directory of its own. `:cd [dir]` sets it,
+  `:pwd` says what it is, and **a directory shown as a listing sets it**, which is
+  what makes the report's case work: `:e main.rs` beside a listing of `src/` is
+  `src/main.rs`. Every name a person types goes through one `resolve` — `:e`,
+  `:w {name}`, `:r {file}`, `:sp`/`:vs`, `gf`'s fallback and `:vimgrep`'s
+  arguments — and a shell and a `:term` *start* there, so `:!cargo build` builds
+  what is on the screen.
+- **Constraints it had to respect, and how:** the resolution is one function, in
+  `Editor`, and absolute paths go through it untouched. That is what keeps the
+  internally-named paths — a document's own path, a language server's file names,
+  a listing's `dir.join(name)` — from being resolved twice, which is the bug this
+  shape is designed not to have.
+- **Files:** `editor/documents.rs` (the directory, `resolve`, `:cd`, `:pwd`, and
+  the hook that a listing arrives through), `editor/windows.rs` (the two places a
+  document is created), `command.rs`, `editor/ex.rs`, `editor/edits.rs` (the
+  names), `inkstone-server/src/{job,terminal}.rs` (the directory a program
+  starts in), and `editor/tests/paths.rs` (new).
+- **Left for later:** `:lcd` and window-local directories; `'autochdir'` as a
+  setting rather than the rule; and showing a path relative to the session when
+  that is shorter than the absolute one.
+
 ## Next, roughly in order
 
 Each item is meant to be *one* coherent change. If one grows into touching six

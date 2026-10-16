@@ -37,6 +37,8 @@ fn command_name(cmd: &str) -> Option<&'static str> {
         "clearjumps" => "clear_jumps",
         "kill" => "kill_command",
         "term" | "terminal" => "terminal",
+        "cd" | "chdir" => "change_dir",
+        "pwd" => "print_dir",
         "p" | "print" => "print_line",
         "w" => "save",
         "w!" => "save_force",
@@ -359,6 +361,7 @@ impl Editor {
     /// — so that what is read comes in as lines of its own rather than joined to
     /// what was there.
     pub(crate) fn read_file_below(&mut self, path: &Path) -> Result<usize, BufferError> {
+        let path = &self.resolve(path);
         // Unlike `:e`, a file that is not there is an error: `:read` is about
         // what is in a file, and there is nothing in this one.
         if !path.exists() {
@@ -628,7 +631,11 @@ impl Editor {
         let named: Vec<PathBuf> = spec
             .files
             .iter()
-            .flat_map(|argument| crate::command::files_named(argument, &ignore))
+            .map(|argument| self.resolve(Path::new(argument)))
+            .flat_map(|argument| {
+                let argument = argument.to_string_lossy().into_owned();
+                crate::command::files_named(&argument, &ignore)
+            })
             .collect();
         let suffixed = |path: &Path| {
             let name = path

@@ -18,6 +18,7 @@ mod marks;
 mod motions;
 mod operators;
 mod options;
+mod paths;
 mod prompt;
 mod registers;
 mod search;

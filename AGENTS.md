@@ -45,9 +45,9 @@ when nothing did).
 
 ## What is not tested, and how to check it
 
-The workspace is covered by 675 tests, including one that drives the real
+The workspace is covered by 683 tests, including one that drives the real
 daemon binary over pipes and inspects the bytes it writes. The kernel, the
-protocol and the daemon are 604 of them; the rest belong to the frontends, the
+protocol and the daemon are 612 of them; the rest belong to the frontends, the
 client and the LSP crate.
 **A frontend's drawing is not covered by CI and cannot be**: raw mode needs a
 real terminal, and a window needs a real window. Both the window's metrics and

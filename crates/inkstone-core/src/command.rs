@@ -239,6 +239,8 @@ impl CommandRegistry {
         open_place,
         up_directory,
         kill_command,
+        change_dir,
+        print_dir,
         terminal,
         shell,
         normal,
@@ -1792,6 +1794,21 @@ fn normal(editor: &mut Editor, params: &[Param]) -> Result<()> {
         return Ok(());
     };
     editor.type_normal_keys(keys);
+    Ok(())
+}
+
+/// `:cd [dir]` — where relative paths lead from now on.
+///
+/// A directory opened as a listing moves it too, which is the whole point: the
+/// directory a person is looking at is the one they mean.
+fn change_dir(editor: &mut Editor, params: &[Param]) -> Result<()> {
+    editor.change_dir(path_param(params).as_deref());
+    Ok(())
+}
+
+/// `:pwd` — where that is.
+fn print_dir(editor: &mut Editor, _params: &[Param]) -> Result<()> {
+    editor.print_dir();
     Ok(())
 }
 
@@ -4046,14 +4063,23 @@ fn open_named(editor: &mut Editor, name: &str, count: usize, line: Option<usize>
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     match editor.buffer.path().and_then(Path::parent) {
         Some(dir) => candidates.push(dir.join(name)),
-        None => candidates.push(std::path::PathBuf::from(name)),
+        // A name with no file around it is relative to where the session is,
+        // which is what makes `gf` work from a listing.
+        None => candidates.push(editor.resolve(Path::new(name))),
     }
     // Then `'path'`, in the order it is written. An entry may hold a wildcard —
     // `*` for a run of characters within a name, and a component that is `**`
     // for "this directory and everything under it", which is vim's
     // `file-searching`. The name itself is taken literally, because `isfname`
     // has no `*` in it: the pattern is the directory's, not the file's.
-    let entries = editor.options.borrow().path.0.clone();
+    let entries: Vec<std::path::PathBuf> = editor
+        .options
+        .borrow()
+        .path
+        .0
+        .iter()
+        .map(|entry| editor.resolve(entry))
+        .collect();
     let suffixes = split_list(&editor.options.borrow().suffixesadd);
     for dir in entries.iter() {
         candidates.extend(path_candidates(dir, name));
